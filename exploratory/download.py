@@ -8,6 +8,7 @@ sys.path.append('../')
 from utils.device import get_device
 
 model_id = "Qwen/Qwen2.5-7B-Instruct"
+# model_id = "google/gemma-2-9b-it"
 
 def set_seed(seed: int = 42):
     random.seed(seed)
