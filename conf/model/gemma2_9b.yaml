@@ -1,0 +1,7 @@
+name: gemma2_9b
+backend: transformers
+model_id: google/gemma-2-9b-it
+family: gemma
+size: 9B
+dtype: bf16
+quantization: none

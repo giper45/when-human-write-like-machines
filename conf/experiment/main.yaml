@@ -1,0 +1,156 @@
+experiment:
+  name: main
+  seed: 42
+
+is_pilot: false
+
+paths:
+  output_dir: runs/main
+  dataset_home_path: ${oc.env:HOME}/.datasets
+  resolved_config: ${paths.output_dir}/resolved_config.yaml
+  human_sources: ${paths.output_dir}/human_sources.jsonl
+  split: ${paths.output_dir}/split.csv
+  generated_dir: ${paths.output_dir}/generated
+  validated: ${paths.output_dir}/validated.parquet
+  quality: ${paths.output_dir}/quality.parquet
+  scores: ${paths.output_dir}/scores.parquet
+  results_dir: ${paths.output_dir}/results
+
+  language: en
+  openwebtext_topic_max_words: 40
+
+filtering:
+  min_words: 150
+  max_words: 500
+  batch_size: 32
+  apply_word_length: true
+  apply_artifact_filter: true
+  apply_toxicity_filter: true
+  apply_not_acceptable_filter: true
+
+
+
+
+  length_bands:
+    short:
+      range: [150, 220]
+      n_per_domain: 200
+    medium:
+      range: [221, 350]
+      n_per_domain: 250
+    long:
+      range: [351, 500]
+      n_per_domain: 150
+
+split:
+  by: sample_id
+  calibration: 0.20
+  test: 0.80
+  seed: 42
+
+regimes:
+  - human
+  - free_llm
+  - h2l
+  - llm2l
+
+generation:
+  backend: transformers
+  temperature: 0.7
+  top_p: 0.9
+  top_k: 40
+  repeat_penalty: 1.05
+  max_new_tokens: 512
+  max_input_tokens: 4096
+  seed: 42
+
+validation:
+  max_attempts: 3
+  free_llm_words: [180, 420]
+  h2l_ratio: [0.70, 1.40]
+  llm2l_ratio: [0.70, 1.40]
+  reject_prompt_leakage: true
+  reject_non_english: true
+
+quality:
+  sbert_model: sentence-transformers/all-mpnet-base-v2
+  sbert_min_h2l: 0.80
+  bertscore_min_h2l: 0.85
+
+detectors:
+  - roberta_detector
+  - bert_detector
+  - radar
+  - fast
+  - binoculars
+
+evaluation:
+  metrics:
+    - auroc
+    - auprc
+    - f1
+    - precision
+    - recall
+    - tpr_at_fpr
+    - ece
+    - brier
+
+  fpr_targets: [0.01, 0.05, 0.10]
+
+  calibration_regimes:
+    - free_llm
+    - h2l
+    - llm2l
+
+  bootstrap:
+    n: 1000
+    unit: sample_id
+    seed: 42
+
+prompts:
+  system: |
+    You are a text rewriting and generation engine for a scientific benchmark.
+    Return only the requested text.
+    Do not add explanations, comments, markdown, headings, or prefaces.
+
+  free_llm: |
+    Write a fluent, self-contained English text about the following topic.
+
+    Constraints:
+    - Use your own wording and structure.
+    - Do not refer to the existence of a source text.
+    - Do not include headings or bullet points.
+    - Keep the length between 220 and 350 words.
+    - Return only the generated text.
+
+    Topic:
+    {topic}
+
+  h2l: |
+    Rewrite the following text in fluent natural English.
+
+    Constraints:
+    - Preserve the original meaning.
+    - Preserve factual claims, entities, and relationships.
+    - Do not add new information.
+    - Do not remove important information.
+    - Change wording and sentence structure where possible.
+    - Keep approximately the same length.
+    - Return only the rewritten text.
+
+    Text:
+    {source_text}
+
+  llm2l: |
+    Rewrite the following text in fluent natural English.
+
+    Constraints:
+    - Preserve the original meaning.
+    - Do not add new information.
+    - Do not remove important information.
+    - Change wording and sentence structure where possible.
+    - Keep approximately the same length.
+    - Return only the rewritten text.
+
+    Text:
+    {free_llm_text}

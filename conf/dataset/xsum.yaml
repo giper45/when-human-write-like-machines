@@ -1,0 +1,9 @@
+defaults:
+  - base_dataset
+name: xsum
+dataset_hf: EdinburghNLP/xsum
+split: train
+text_column: document
+domain: news
+n_samples: 600
+topic_source: summary

@@ -1,0 +1,10 @@
+defaults:
+  - base_dataset
+
+name: wp
+dataset_hf: euclaise/writingprompts
+split: train
+text_column: story
+domain: creative
+n_samples: 600
+topic_source: prompt

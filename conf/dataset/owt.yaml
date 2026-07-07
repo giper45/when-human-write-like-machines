@@ -1,0 +1,9 @@
+defaults:
+  - base_dataset
+name: owt
+dataset_hf: Skylion007/openwebtext
+text_column: text
+split: train
+domain: web
+n_samples: 600
+topic_source: first_sentences

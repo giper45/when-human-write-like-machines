@@ -1,0 +1,5 @@
+cleaned_dataset_name: ${dataset.name}-clean_len150-300_no-artifacts_no-toxic_acceptable_v1
+postfix_no_toxic_dataset: processed_notoxic
+
+no_toxic_name: ${dataset.name}-${dataset.postfix_no_toxic_dataset}
+no_toxic_name_pilot: ${dataset.name}-${dataset.postfix_no_toxic_dataset}-pilot

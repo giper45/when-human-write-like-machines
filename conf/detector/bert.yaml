@@ -1,0 +1,2 @@
+detector_path_or_id: ${oc.env:HOME}/.pretrained-models/BERT-Defense
+inverse_labels: false

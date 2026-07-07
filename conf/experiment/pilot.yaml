@@ -1,0 +1,24 @@
+defaults:
+  - main
+  - _self_
+
+is_pilot: true
+pilot_length: 100
+
+experiment:
+  name: pilot
+
+paths:
+  output_dir: runs/pilot
+
+
+length_bands:
+  short:
+    range: [150, 220]
+    n_per_domain: 10
+  medium:
+    range: [221, 350]
+    n_per_domain: 12
+  long:
+    range: [351, 500]
+    n_per_domain: 8

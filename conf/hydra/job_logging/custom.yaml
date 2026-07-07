@@ -1,0 +1,40 @@
+# conf/hydra/job_logging/custom.yaml
+version: 1
+
+formatters:
+  simple:
+    format: "[%(asctime)s][%(name)s][%(levelname)s] - %(message)s"
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    formatter: simple
+    stream: ext://sys.stdout
+
+  file:
+    class: logging.FileHandler
+    formatter: simple
+    filename: ${hydra.runtime.output_dir}/app.log
+    mode: a
+
+root:
+  level: INFO
+  handlers: [console, file]
+
+loggers:
+  transformers:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+
+  datasets:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+
+  huggingface_hub:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+
+disable_existing_loggers: false

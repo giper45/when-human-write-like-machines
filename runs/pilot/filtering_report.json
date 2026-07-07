@@ -1,0 +1,31 @@
+{
+  "dataset_name": "xsum-processed_notoxic",
+  "rows_initial": 100,
+  "steps": [
+    {
+      "filter_name": "word_length",
+      "rows_before": 100,
+      "rows_after": 73,
+      "rows_removed": 27
+    },
+    {
+      "filter_name": "structural_artifact",
+      "rows_before": 73,
+      "rows_after": 64,
+      "rows_removed": 9
+    },
+    {
+      "filter_name": "toxicity",
+      "rows_before": 64,
+      "rows_after": 64,
+      "rows_removed": 0
+    },
+    {
+      "filter_name": "not_acceptable",
+      "rows_before": 64,
+      "rows_after": 63,
+      "rows_removed": 1
+    }
+  ],
+  "rows_final": 63
+}

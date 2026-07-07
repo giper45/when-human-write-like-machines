@@ -1,0 +1,7 @@
+name: llama32_3b
+backend: transformers
+model_id: meta-llama/Llama-3.2-3B-Instruct
+family: llama
+size: 3B
+dtype: bf16
+quantization: none

@@ -1,0 +1,7 @@
+name: qwen25_7b
+backend: transformers
+model_id: Qwen/Qwen2.5-7B-Instruct
+family: qwen
+size: 7B
+dtype: bf16
+quantization: none

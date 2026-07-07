@@ -1,0 +1,7 @@
+name: mistral7b
+backend: transformers
+model_id: mistralai/Mistral-7B-Instruct-v0.3
+family: mistral
+size: 7B
+dtype: bf16
+quantization: none

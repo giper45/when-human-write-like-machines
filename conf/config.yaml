@@ -1,0 +1,23 @@
+defaults:
+  - experiment: main
+  - dataset: xsum
+  - model: llama32_2b
+  - _self_
+
+project:
+  name: h2lbench
+
+stage: all
+
+runtime:
+  device: cuda
+  cuda_device: 0
+  num_workers: 1
+  resume: true
+  log_level: info
+
+# hydra:
+#   run:
+#     dir: ${paths.output_dir}/hydra/${now:%Y-%m-%d_%H-%M-%S}
+#   job:
+#     chdir: false

@@ -1,0 +1,45 @@
+defaults:
+  - main
+  - _self_
+
+experiment:
+  name: sensitivity_temperature
+
+paths:
+  output_dir: runs/sensitivity_temperature
+
+dataset:
+  sources:
+    - name: xsum
+      domain: news
+      n_samples: 100
+      topic_source: summary
+
+    - name: writing_prompts
+      domain: creative
+      n_samples: 100
+      topic_source: prompt
+
+    - name: openwebtext
+      domain: web
+      n_samples: 100
+      topic_source: first_sentences
+
+  length_bands:
+    short:
+      range: [150, 220]
+      n_per_domain: 33
+    medium:
+      range: [221, 350]
+      n_per_domain: 42
+    long:
+      range: [351, 500]
+      n_per_domain: 25
+
+regimes:
+  - h2l
+
+sensitivity:
+  variable: temperature
+  values: [0.2, 0.7, 1.0]
+  main_value: 0.7
