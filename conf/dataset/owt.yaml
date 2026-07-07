@@ -7,3 +7,4 @@ split: train
 domain: web
 n_samples: 600
 topic_source: first_sentences
+n_sentences: 2

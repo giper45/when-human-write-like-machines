@@ -5,7 +5,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 import sys
 sys.path.append('../')
 
-from device import get_device
+from lib.device import get_device
 
 model_id = "google/gemma-2-9b-it"
 

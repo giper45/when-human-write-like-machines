@@ -16,7 +16,7 @@ from os.path import join as j
 
 from utils import constants
 from utils.device import get_device
-# from utils.evaluatuon.evaluation import Predictions
+from utils.evaluation import Predictions
 
 # from m4gt_classifier_train_optimized import softmax_with_temperature
 

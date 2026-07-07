@@ -1,5 +1,5 @@
 import os
-from datasets import load_from_disk
+from datasets import concatenate_datasets, load_from_disk
 from utils.logger import log
 
 class DatasetLoader:
@@ -36,3 +36,37 @@ class DatasetLoader:
 #     return load_from_disk(get_local_dataset_path(dataset_name) + "_notoxic")
 
 # def save_final_dataset(dataset, cfg):
+
+def combine_human_ai_dataset(dataset_human, 
+                             dataset_machine, 
+                             label_human, 
+                             label_machine,
+                             seed=42):
+
+    # Add labels to human and machine datasets
+    dataset_human = dataset_human.map(
+        lambda x: {"label": label_human}
+    )
+    dataset_machine = dataset_machine.map(
+        lambda x: {"label": label_machine}
+    )
+
+    # Concatenate datasets
+    combined_dataset = concatenate_datasets([dataset_human, dataset_machine])
+
+    # Shuffle the combined dataset
+    combined_dataset = combined_dataset.shuffle(seed=seed)
+
+    # Generate new ids after combination and shuffling
+    combined_dataset = combined_dataset.map(
+        lambda x, idx: {"id": idx},
+        with_indices=True
+    )
+
+    return combined_dataset
+
+def save_texts_line_by_line(dataset, output_path, text_column="text"):
+    with open(output_path, "w", encoding="utf-8") as f:
+        for text in dataset[text_column]:
+            text = text.replace("\n", " ").strip()
+            f.write(text + "\n")

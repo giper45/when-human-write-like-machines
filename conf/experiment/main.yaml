@@ -31,16 +31,16 @@ filtering:
 
 
 
-  length_bands:
-    short:
-      range: [150, 220]
-      n_per_domain: 200
-    medium:
-      range: [221, 350]
-      n_per_domain: 250
-    long:
-      range: [351, 500]
-      n_per_domain: 150
+ranges:
+  short:
+    range: [150, 220]
+    n_per_domain: 200
+  medium:
+    range: [221, 350]
+    n_per_domain: 200
+  long:
+    range: [351, 500]
+    n_per_domain: 200
 
 split:
   by: sample_id
@@ -69,13 +69,11 @@ validation:
   free_llm_words: [180, 420]
   h2l_ratio: [0.70, 1.40]
   llm2l_ratio: [0.70, 1.40]
-  reject_prompt_leakage: true
-  reject_non_english: true
 
-quality:
-  sbert_model: sentence-transformers/all-mpnet-base-v2
-  sbert_min_h2l: 0.80
-  bertscore_min_h2l: 0.85
+# quality:
+#   sbert_model: sentence-transformers/all-mpnet-base-v2
+#   sbert_min_h2l: 0.80
+#   bertscore_min_h2l: 0.85
 
 detectors:
   - roberta_detector
