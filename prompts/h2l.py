@@ -1,4 +1,4 @@
-def get_prompt(cfg):
+def get_prompt(text):
     return f"""Rewrite the following text in fluent natural English.
 Constraints:
 - Preserve the original meaning.
@@ -10,5 +10,5 @@ Constraints:
 - Return only the rewritten text.
 
 Text:
-{cfg.source_text}
+{text}
 """

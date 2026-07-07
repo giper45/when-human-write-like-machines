@@ -5,9 +5,9 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 import sys
 sys.path.append('../')
 
-from lib.device import get_device
+from utils.device import get_device
 
-model_id = "google/gemma-2-9b-it"
+model_id = "Qwen/Qwen2.5-7B-Instruct"
 
 def set_seed(seed: int = 42):
     random.seed(seed)

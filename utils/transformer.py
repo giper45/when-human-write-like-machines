@@ -1,4 +1,19 @@
 import torch
+import random
+import numpy as np
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+
+def clean_text(text: str) -> str:
+    """
+    Cleans the generated text by removing unwanted characters and formatting.
+    """
+    # Remove leading/trailing whitespace
+    text = text.strip()
+    # Replace multiple spaces with a single space
+    text = ' '.join(text.split())
+    # Remove newlines
+    text = text.replace('\n', ' ')
+    return text
 
 @torch.inference_mode()
 def generate_text(
@@ -9,7 +24,7 @@ def generate_text(
     temperature: float = 0.7,
     top_p: float = 0.9,
     top_k: int = 40,
-    max_new_tokens: int = 256,
+    max_new_tokens: int = 512,
 ):
         # Gemma chat template does not support sy"stem role.
     model_id = model.config._name_or_path
@@ -56,4 +71,25 @@ Return only the requested output."""
     input_length = inputs["input_ids"].shape[-1]
     generated_ids = output_ids[0][input_length:]
 
-    return tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+    return clean_text(tokenizer.decode(generated_ids, skip_special_tokens=True).strip())
+
+def set_seed(seed: int = 42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+def load_model_bf16(model_id: str, device: str = "cuda"):
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        torch_dtype=torch.bfloat16,
+        device_map=device,
+    )
+
+    model.eval()
+    return model, tokenizer
