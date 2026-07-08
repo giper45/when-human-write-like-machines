@@ -1,6 +1,7 @@
 defaults:
   - experiment: main
   - dataset: xsum
+  - detector: roberta
   - model: llama32_2b
   - _self_
 

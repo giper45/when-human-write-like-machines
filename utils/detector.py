@@ -1,20 +1,13 @@
-import json
 import os
-import random
-import re
-import time
 import torch
-from datasets import Dataset, DatasetDict
+from datasets import Dataset
 from tqdm import tqdm
-from transformers import RobertaTokenizer, DataCollatorWithPadding
-from transformers import BertForSequenceClassification, RobertaForSequenceClassification, RobertaTokenizer, BertTokenizer
+from transformers import DataCollatorWithPadding
+from transformers import RobertaForSequenceClassification, RobertaTokenizer
 
 from torch.utils.data import DataLoader
 import transformers
 import numpy as np
-from os.path import join as j
-
-from utils import constants
 from utils.device import get_device
 from utils.evaluation import Predictions
 
@@ -81,9 +74,114 @@ def predict_batch(data_loader, model, device, should_negate):
     return Predictions(predicted_labels, true_labels, pred_probs, should_negate)
 
 
+def sigmoid(x):
+    return 1.0 / (1.0 + np.exp(-x))
+
+
+def binoculars_score_to_machine_probability(scores, threshold, temperature):
+    """
+    Converts raw Binoculars scores into a machine-likeness score.
+
+    Lower Binoculars scores indicate stronger AI-generation evidence, so we map
+    the configured threshold to 0.5 and keep the transform monotonic.
+    """
+    scores = np.asarray(scores, dtype=float)
+    temperature = max(float(temperature), 1e-6)
+    logits = (threshold - scores) / temperature
+    return sigmoid(logits)
+
+
+def get_batch_size(cfg):
+    return int(cfg.experiment.batch_size)
+
+
+def load_sequence_classifier_detector(cfg):
+    detector_path_or_id = cfg.detector.detector_path_or_id
+    model_cls = getattr(transformers, cfg.detector.model_class)
+    tokenizer_cls = getattr(transformers, cfg.detector.tokenizer_class)
+    tokenizer_name = getattr(cfg.detector, "tokenizer_name", detector_path_or_id)
+
+    model = model_cls.from_pretrained(detector_path_or_id)
+    tokenizer = tokenizer_cls.from_pretrained(tokenizer_name)
+
+    model.eval()
+    return DetectorModel(
+        model,
+        tokenizer,
+        batch_size=get_batch_size(cfg),
+        inverse_labels=getattr(cfg.detector, "inverse_labels", False),
+    )
+
+
+class BinocularsDetectorModel:
+    def __init__(
+        self,
+        binoculars_detector,
+        batch_size=8,
+        score_threshold=0.8536432310785527,
+        probability_temperature=0.05,
+    ):
+        ensure_determinism()
+        self.detector = binoculars_detector
+        self.batch_size = batch_size
+        self.score_threshold = float(score_threshold)
+        self.probability_temperature = float(probability_temperature)
+
+    def predict(self, dataset: Dataset):
+        assert len(dataset["id"]) == len(set(dataset["id"])), "Duplicate IDS!"
+
+        predicted_labels = []
+        true_labels = []
+        pred_probs = []
+
+        texts = dataset["text"]
+        labels = dataset["label"]
+
+        for start in tqdm(
+            range(0, len(texts), self.batch_size),
+            desc="Processing Binoculars batches",
+        ):
+            stop = min(start + self.batch_size, len(texts))
+            batch_texts = texts[start:stop]
+            batch_scores = self.detector.compute_score(batch_texts)
+            batch_probs = binoculars_score_to_machine_probability(
+                batch_scores,
+                threshold=self.score_threshold,
+                temperature=self.probability_temperature,
+            )
+            batch_preds = (np.asarray(batch_scores, dtype=float) < self.score_threshold).astype(int)
+
+            predicted_labels.extend(batch_preds.tolist())
+            true_labels.extend(labels[start:stop])
+            pred_probs.extend(batch_probs.tolist())
+
+        predictions = Predictions(predicted_labels, true_labels, pred_probs)
+        predictions.set_ids(list(dataset["id"]))
+        return predictions
+
+
+def load_binoculars_detector(cfg):
+    from utils.binoculars import Binoculars
+
+    detector = Binoculars(
+        observer_name_or_path=cfg.detector.observer_name_or_path,
+        performer_name_or_path=cfg.detector.performer_name_or_path,
+        use_bfloat16=getattr(cfg.detector, "use_bfloat16", True),
+        max_token_observed=getattr(cfg.detector, "max_token_observed", 512),
+        mode=getattr(cfg.detector, "mode", "low-fpr"),
+    )
+
+    return BinocularsDetectorModel(
+        detector,
+        batch_size=get_batch_size(cfg),
+        score_threshold=getattr(cfg.detector, "score_threshold", detector.threshold),
+        probability_temperature=getattr(cfg.detector, "probability_temperature", 0.05),
+    )
+
+
 
 class DetectorModel:
-    def __init__(self, model, tokenizer, batch_size=16):
+    def __init__(self, model, tokenizer, batch_size=16, inverse_labels=False):
         ensure_determinism()
         self.errors = 0
 
@@ -93,11 +191,14 @@ class DetectorModel:
         # self.optimal_threshold = 0.5  # Default threshold for binary classification
         self.batch_size = batch_size
         self.negate = False  # For RADAR model, we need to negate predictions
+        if inverse_labels:
+            self.enable_negate()
 
     def enable_negate(self):
         """
         Set whether to negate predictions (for RADAR model).
         """
+        print("Enable negate for predictions (for RADAR model)")
         self.negate = True
 
     def get_tokenized_dataset(self, dataset):
@@ -145,3 +246,43 @@ class DetectorModel:
         ids = [id for id in dataset['id']]
         predictions.set_ids(ids)
         return predictions
+
+
+def load_detector_model(cfg):
+    detector_type = getattr(cfg.detector, "detector_type", "sequence_classifier")
+    if detector_type == "binoculars":
+        return load_binoculars_detector(cfg)
+    return load_sequence_classifier_detector(cfg)
+
+# class RadarModel(DetectorModel):
+#     def __init__(self):
+#         detector_path_or_id = "TrustSafeAI/RADAR-Vicuna-7B"
+#         detector = transformers.AutoModelForSequenceClassification.from_pretrained(detector_path_or_id)
+#         tokenizer = transformers.AutoTokenizer.from_pretrained(detector_path_or_id)
+#         detector.to(get_device())
+#         detector.eval()
+#         super().__init__(detector, tokenizer)
+#         self.optimal_threshold = 0.05  # Optimal threshold for RADAR model
+#         self.enable_negate()
+
+# class BertModel(DetectorModel):
+#     def __init__(self):
+#         model = BertForSequenceClassification.from_pretrained(
+#             os.path.join(constants.PRETRAINED_PATH, "BERT-Defense")
+#         )
+#         tokenizer = BertTokenizer.from_pretrained("bert-large-cased")
+#         model.eval()
+#         super().__init__(model, tokenizer)
+
+class RoBertaDefenseModel(DetectorModel):
+    def __init__(self):
+        model_path = os.path.expanduser(
+            os.path.join("~", ".pretrained-models", "RoBERTa-Defense")
+        )
+
+
+        model = RobertaForSequenceClassification.from_pretrained(model_path)
+        tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
+        model.eval()
+        super().__init__(model, tokenizer)
+

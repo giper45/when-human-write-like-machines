@@ -1,2 +1,7 @@
+detector_type: sequence_classifier
 detector_path_or_id: ${oc.env:HOME}/.pretrained-models/BERT-Defense
+model_class: BertForSequenceClassification
+model_name: BERT-Defense
+tokenizer_class: BertTokenizer
+tokenizer_name: bert-large-cased
 inverse_labels: false

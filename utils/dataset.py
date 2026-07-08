@@ -1,5 +1,6 @@
 import os
-from datasets import concatenate_datasets, load_from_disk
+from datasets import concatenate_datasets, load_from_disk, Dataset
+
 from utils.logger import log
 
 class DatasetLoader:
@@ -36,20 +37,28 @@ class DatasetLoader:
 #     return load_from_disk(get_local_dataset_path(dataset_name) + "_notoxic")
 
 # def save_final_dataset(dataset, cfg):
+LABEL_HUMAN = 0
+LABEL_MACHINE = 1
+def combine_human_ai_texts(human_texts, ai_texts, seed=42):
+    """
+    Combines human and AI texts into a single dataset with labels.
 
-def combine_human_ai_dataset(dataset_human, 
-                             dataset_machine, 
-                             label_human, 
-                             label_machine,
-                             seed=42):
+    Args:
+        human_texts (list): List of human-generated texts.
+        ai_texts (list): List of AI-generated texts.
+        seed (int): Random seed for shuffling.
+
+    Returns:
+        Dataset: Combined and shuffled dataset with labels.
+    """
+
+    # Create datasets from lists
+    dataset_human = Dataset.from_dict({"text": human_texts})
+    dataset_machine = Dataset.from_dict({"text": ai_texts})
 
     # Add labels to human and machine datasets
-    dataset_human = dataset_human.map(
-        lambda x: {"label": label_human}
-    )
-    dataset_machine = dataset_machine.map(
-        lambda x: {"label": label_machine}
-    )
+    dataset_human = dataset_human.map(lambda x: {"label": LABEL_HUMAN})
+    dataset_machine = dataset_machine.map(lambda x: {"label": LABEL_MACHINE})
 
     # Concatenate datasets
     combined_dataset = concatenate_datasets([dataset_human, dataset_machine])
@@ -58,12 +67,10 @@ def combine_human_ai_dataset(dataset_human,
     combined_dataset = combined_dataset.shuffle(seed=seed)
 
     # Generate new ids after combination and shuffling
-    combined_dataset = combined_dataset.map(
-        lambda x, idx: {"id": idx},
-        with_indices=True
-    )
+    combined_dataset = combined_dataset.map(lambda x, idx: {"id": idx}, with_indices=True)
 
     return combined_dataset
+
 
 def save_texts_line_by_line(dataset, output_path, text_column="text"):
     with open(output_path, "w", encoding="utf-8") as f:

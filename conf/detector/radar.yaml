@@ -1,2 +1,6 @@
+detector_type: sequence_classifier
 detector_path_or_id: "TrustSafeAI/RADAR-Vicuna-7B"
+model_class: AutoModelForSequenceClassification
+tokenizer_class: AutoTokenizer
+tokenizer_name: "TrustSafeAI/RADAR-Vicuna-7B"
 inverse_labels: true

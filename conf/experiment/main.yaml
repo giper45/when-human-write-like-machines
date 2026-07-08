@@ -3,6 +3,7 @@ experiment:
   seed: 42
 
 is_pilot: false
+batch_size: 32
 
 paths:
   output_dir: runs/main
@@ -75,12 +76,12 @@ validation:
 #   sbert_min_h2l: 0.80
 #   bertscore_min_h2l: 0.85
 
-detectors:
-  - roberta_detector
-  - bert_detector
-  - radar
-  - fast
-  - binoculars
+# detectors:
+#   - roberta_detector
+#   - bert_detector
+#   - radar
+#   - fast
+#   - binoculars
 
 evaluation:
   metrics:

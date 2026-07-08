@@ -1,2 +1,7 @@
+detector_type: sequence_classifier
 detector_path_or_id: ${oc.env:HOME}/.pretrained-models/RoBERTa-Defense
+model_class: RobertaForSequenceClassification
+model_name: RoBERTa-Defense
+tokenizer_class: RobertaTokenizer
+tokenizer_name: roberta-base
 inverse_labels: false
