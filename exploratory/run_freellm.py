@@ -68,7 +68,7 @@ def main(cfg: DictConfig) -> None:
             topic = d['topic']
             freellm_prompt = freellm.get_prompt(topic, min_length, max_length)
 
-            # print(freellm_prompt)
+            print(freellm_prompt)
 
         # for t in tqdm(lines, desc="Processing lines"):
         #     h2l_prompt = h2l.get_prompt(t)

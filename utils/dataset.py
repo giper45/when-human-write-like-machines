@@ -37,18 +37,18 @@ class DatasetLoader:
 
 # def save_final_dataset(dataset, cfg):
 
+LABEL_HUMAN = 0
+LABEL_MACHINE = 1
 def combine_human_ai_dataset(dataset_human, 
                              dataset_machine, 
-                             label_human, 
-                             label_machine,
                              seed=42):
 
     # Add labels to human and machine datasets
     dataset_human = dataset_human.map(
-        lambda x: {"label": label_human}
+        lambda x: {"label": LABEL_HUMAN}
     )
     dataset_machine = dataset_machine.map(
-        lambda x: {"label": label_machine}
+        lambda x: {"label": LABEL_MACHINE}
     )
 
     # Concatenate datasets
