@@ -1,31 +1,31 @@
 {
-  "dataset_name": "xsum-processed_notoxic",
-  "rows_initial": 204045,
+  "dataset_name": "wp-processed_notoxic",
+  "rows_initial": 272600,
   "steps": [
     {
       "filter_name": "word_length",
-      "rows_before": 204045,
-      "rows_after": 114525,
-      "rows_removed": 89520
+      "rows_before": 272600,
+      "rows_after": 131014,
+      "rows_removed": 141586
     },
     {
       "filter_name": "structural_artifact",
-      "rows_before": 114525,
-      "rows_after": 53951,
-      "rows_removed": 60574
+      "rows_before": 131014,
+      "rows_after": 37283,
+      "rows_removed": 93731
     },
     {
       "filter_name": "toxicity",
-      "rows_before": 53951,
-      "rows_after": 53951,
+      "rows_before": 37283,
+      "rows_after": 37283,
       "rows_removed": 0
     },
     {
       "filter_name": "not_acceptable",
-      "rows_before": 53951,
-      "rows_after": 52842,
-      "rows_removed": 1109
+      "rows_before": 37283,
+      "rows_after": 18880,
+      "rows_removed": 18403
     }
   ],
-  "rows_final": 52842
+  "rows_final": 18880
 }
