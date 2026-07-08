@@ -4,15 +4,7 @@ import os
 import numpy as np
 import torch
 import transformers
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-bnb_config = BitsAndBytesConfig(
-        load_in_8bit=True,
-        llm_int8_threshold=6.0,
-        llm_int8_skip_modules=None,  # puoi personalizzarlo
-
-)
-
-
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from .utils import assert_tokenizer_consistency
 from .metrics import perplexity, entropy
@@ -47,7 +39,7 @@ class Binoculars(object):
                 pretrained_model_name_or_path=observer_name_or_path,
                 device_map={"": DEVICE_1},
                 trust_remote_code=True,
-                quantization_config=bnb_config,
+                torch_dtype=torch.bfloat16 if use_bfloat16 else torch.float32,
                 token=huggingface_config["TOKEN"]
 
         )
@@ -56,25 +48,10 @@ class Binoculars(object):
                 pretrained_model_name_or_path=performer_name_or_path,
                 device_map={"": DEVICE_2},
                 trust_remote_code=True,
-                quantization_config=bnb_config,
+                torch_dtype=torch.bfloat16 if use_bfloat16 else torch.float32,
                 token=huggingface_config["TOKEN"]
 
         )
-
-        # self.observer_model = AutoModelForCausalLM.from_pretrained(observer_name_or_path,
-        #                                                            device_map={"": DEVICE_1},
-        #                                                            trust_remote_code=True,
-        #                                                            torch_dtype=torch.bfloat16 if use_bfloat16
-        #                                                            else torch.float32,
-        #                                                            token=huggingface_config["TOKEN"]
-        #                                                            )
-        # self.performer_model = AutoModelForCausalLM.from_pretrained(performer_name_or_path,
-        #                                                             device_map={"": DEVICE_2},
-        #                                                             trust_remote_code=True,
-        #                                                             torch_dtype=torch.bfloat16 if use_bfloat16
-        #                                                             else torch.float32,
-        #                                                             token=huggingface_config["TOKEN"]
-        #                                                             )
         self.observer_model.eval()
         self.performer_model.eval()
 

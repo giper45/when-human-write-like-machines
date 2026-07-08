@@ -95,6 +95,10 @@ def get_batch_size(cfg):
     return int(cfg.experiment.batch_size)
 
 
+def get_binoculars_batch_size(cfg):
+    return int(getattr(cfg.detector, "batch_size", get_batch_size(cfg)))
+
+
 def load_sequence_classifier_detector(cfg):
     detector_path_or_id = cfg.detector.detector_path_or_id
     model_cls = getattr(transformers, cfg.detector.model_class)
@@ -173,7 +177,7 @@ def load_binoculars_detector(cfg):
 
     return BinocularsDetectorModel(
         detector,
-        batch_size=get_batch_size(cfg),
+        batch_size=get_binoculars_batch_size(cfg),
         score_threshold=getattr(cfg.detector, "score_threshold", detector.threshold),
         probability_temperature=getattr(cfg.detector, "probability_temperature", 0.05),
     )
@@ -285,4 +289,3 @@ class RoBertaDefenseModel(DetectorModel):
         tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
         model.eval()
         super().__init__(model, tokenizer)
-

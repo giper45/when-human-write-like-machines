@@ -6,4 +6,5 @@ score_threshold: 0.8536432310785527
 probability_temperature: 0.05
 max_token_observed: 512
 use_bfloat16: true
+batch_size: 1
 inverse_labels: false
