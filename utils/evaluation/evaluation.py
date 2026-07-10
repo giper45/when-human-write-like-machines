@@ -51,6 +51,7 @@ def build_predictions_for_comparison(
     score_col: str,
     regime_col: str = "regime",
     id_col: str = "sample_id",
+    prediction_col: str = "default_pred",
 ):
     relevant_regimes = list(positive_regimes) + list(negative_regimes)
     subset = frame[frame[regime_col].isin(relevant_regimes)].copy()
@@ -58,13 +59,36 @@ def build_predictions_for_comparison(
         raise ValueError("No rows found for the requested regimes.")
 
     true_labels = subset[regime_col].isin(positive_regimes).astype(int).tolist()
-    pred_probs = subset[score_col].astype(float).tolist()
-    predicted_labels = (subset[score_col].astype(float) >= 0.5).astype(int).tolist()
+    scores = subset[score_col].astype(float).tolist()
+    if prediction_col in subset.columns:
+        predicted_labels = subset[prediction_col].astype(int).tolist()
+    elif "default_threshold" in subset.columns:
+        predicted_labels = (
+            subset[score_col].astype(float) >= subset["default_threshold"].astype(float)
+        ).astype(int).tolist()
+    else:
+        predicted_labels = (subset[score_col].astype(float) >= 0.5).astype(int).tolist()
+
+    default_threshold = 0.5
+    if "default_threshold" in subset.columns and not subset["default_threshold"].empty:
+        default_threshold = float(subset["default_threshold"].iloc[0])
+    score_direction = "higher_is_ai"
+    if "score_direction" in subset.columns and not subset["score_direction"].empty:
+        score_direction = str(subset["score_direction"].iloc[0])
+    raw_scores = subset["raw_score"].astype(float).tolist() if "raw_score" in subset.columns else scores
+    scores_are_probabilities = None
+    if "scores_are_probabilities" in subset.columns and not subset["scores_are_probabilities"].empty:
+        scores_are_probabilities = bool(subset["scores_are_probabilities"].iloc[0])
 
     preds = Predictions(
         predicted_labels=predicted_labels,
         true_labels=true_labels,
-        pred_probs=pred_probs,
+        pred_probs=scores if scores_are_probabilities else None,
+        scores=scores,
+        raw_scores=raw_scores,
+        default_threshold=default_threshold,
+        score_direction=score_direction,
+        scores_are_probabilities=scores_are_probabilities,
     )
     if id_col in subset.columns:
         preds.set_ids(subset[id_col].tolist())
@@ -78,6 +102,7 @@ def evaluate_binary_comparison(
     score_col: str,
     regime_col: str = "regime",
     id_col: str = "sample_id",
+    prediction_col: str = "default_pred",
     comparison_name: Optional[str] = None,
     comparison_type: str = "pairwise",
     tpr_fpr_target: float = 0.01,
@@ -90,6 +115,7 @@ def evaluate_binary_comparison(
         score_col=score_col,
         regime_col=regime_col,
         id_col=id_col,
+        prediction_col=prediction_col,
     )
 
     metadata = {
@@ -112,6 +138,7 @@ def evaluate_regime_comparisons(
     score_col: str,
     regime_col: str = "regime",
     id_col: str = "sample_id",
+    prediction_col: str = "default_pred",
     regimes: Optional[Sequence[str]] = None,
     include_one_vs_rest: bool = True,
     tpr_fpr_target: float = 0.01,
@@ -131,6 +158,7 @@ def evaluate_regime_comparisons(
                 score_col=score_col,
                 regime_col=regime_col,
                 id_col=id_col,
+                prediction_col=prediction_col,
                 comparison_name=f"{positive}_vs_{negative}",
                 comparison_type="pairwise",
                 tpr_fpr_target=tpr_fpr_target,
@@ -149,6 +177,7 @@ def evaluate_regime_comparisons(
                     score_col=score_col,
                     regime_col=regime_col,
                     id_col=id_col,
+                    prediction_col=prediction_col,
                     comparison_name=f"{positive}_vs_rest",
                     comparison_type="one_vs_rest",
                     tpr_fpr_target=tpr_fpr_target,
@@ -225,14 +254,14 @@ def compute_rewrite_deltas(
             "baseline_comparison": baseline_human_vs_free.comparison_name,
             "target_comparison": rewritten_llm.comparison_name,
             "delta_auroc": rewritten_llm.auroc - baseline_human_vs_free.auroc,
-            "delta_tpr_at_1pct_fpr": rewritten_llm.tpr_at_1pct_fpr - baseline_human_vs_free.tpr_at_1pct_fpr,
+            "delta_tpr_at_fpr": rewritten_llm.tpr_at_fpr - baseline_human_vs_free.tpr_at_fpr,
         },
         {
             "delta_name": "human_to_h2l",
             "baseline_comparison": baseline_human_vs_free.comparison_name,
             "target_comparison": rewritten_human.comparison_name,
             "delta_auroc": rewritten_human.auroc - baseline_human_vs_free.auroc,
-            "delta_tpr_at_1pct_fpr": rewritten_human.tpr_at_1pct_fpr - baseline_human_vs_free.tpr_at_1pct_fpr,
+            "delta_tpr_at_fpr": rewritten_human.tpr_at_fpr - baseline_human_vs_free.tpr_at_fpr,
         },
     ]
 

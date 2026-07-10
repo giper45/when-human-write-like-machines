@@ -7,4 +7,4 @@ no_toxic_name: ${dataset.name}-${dataset.postfix_no_toxic_dataset}
 no_toxic_name_pilot: ${dataset.name}-${dataset.postfix_no_toxic_dataset}-pilot
 
 h2l_name: ${dataset.name}-h2l
-llm_name: ${dataset.name}-
+freellm_name: ${dataset.name}_${model.name}_freellm

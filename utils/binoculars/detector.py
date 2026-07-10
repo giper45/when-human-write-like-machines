@@ -31,6 +31,7 @@ class Binoculars(object):
                  use_bfloat16: bool = True,
                  max_token_observed: int = 512,
                  mode: str = "low-fpr",
+                 trust_remote_code: bool = False,
                  ) -> None:
         assert_tokenizer_consistency(observer_name_or_path, performer_name_or_path)
 
@@ -38,7 +39,7 @@ class Binoculars(object):
         self.observer_model: Any = AutoModelForCausalLM.from_pretrained(
                 pretrained_model_name_or_path=observer_name_or_path,
                 device_map={"": DEVICE_1},
-                trust_remote_code=True,
+                trust_remote_code=trust_remote_code,
                 torch_dtype=torch.bfloat16 if use_bfloat16 else torch.float32,
                 token=huggingface_config["TOKEN"]
 
@@ -47,7 +48,7 @@ class Binoculars(object):
         self.performer_model: Any = AutoModelForCausalLM.from_pretrained(
                 pretrained_model_name_or_path=performer_name_or_path,
                 device_map={"": DEVICE_2},
-                trust_remote_code=True,
+                trust_remote_code=trust_remote_code,
                 torch_dtype=torch.bfloat16 if use_bfloat16 else torch.float32,
                 token=huggingface_config["TOKEN"]
 

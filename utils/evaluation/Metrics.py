@@ -1,13 +1,17 @@
 import json
 import os
 from typing import Dict, List, Optional
+from utils.logger import log
 
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
+    accuracy_score,
+    balanced_accuracy_score,
     brier_score_loss,
     confusion_matrix,
     f1_score,
+    precision_score,
     recall_score,
     roc_auc_score,
     roc_curve,
@@ -16,21 +20,41 @@ from sklearn.metrics import (
 from utils.evaluation.Predictions import Predictions
 
 
+def drop_deprecated_summary_keys(metadata):
+    deprecated_keys = {"ece", "brier", "ece_bins", "delta_ece", "delta_brier"}
+    return {
+        key: value
+        for key, value in (metadata or {}).items()
+        if key not in deprecated_keys and not str(key).endswith("_1pct_fpr")
+    }
+
+
 def specificity_score(y_true, y_pred):
     """Calculate specificity (True Negative Rate)."""
     cm = confusion_matrix(y_true, y_pred)
     return cm[0, 0] / (cm[0, 0] + cm[0, 1])
 
 
-def compute_tpr_at_fpr(y_true, pred_probs, target_fpr=0.01):
+def scores_are_valid_probabilities(scores):
+    scores = np.asarray(scores, dtype=float)
+    if scores.size == 0:
+        return False
+    return bool(np.all(np.isfinite(scores)) and np.all((scores >= 0.0) & (scores <= 1.0)))
+
+
+def get_prediction_scores(preds: Predictions):
+    return getattr(preds, "scores", getattr(preds, "pred_probs", []))
+
+
+def compute_tpr_at_fpr(y_true, scores, target_fpr=0.01):
     """
     Returns the best achievable TPR while keeping FPR below the requested cap.
     """
     y_true = np.asarray(y_true)
-    pred_probs = np.asarray(pred_probs)
+    scores = np.asarray(scores)
 
     try:
-        fpr, tpr, _ = roc_curve(y_true, pred_probs)
+        fpr, tpr, _ = roc_curve(y_true, scores)
     except ValueError:
         return np.nan
 
@@ -40,17 +64,18 @@ def compute_tpr_at_fpr(y_true, pred_probs, target_fpr=0.01):
     return float(np.max(tpr[valid]))
 
 
-def compute_ece(y_true, pred_probs, n_bins=10):
+def compute_ece(y_true, scores, n_bins=10):
     """
     Expected Calibration Error for binary probabilistic predictions.
     """
     y_true = np.asarray(y_true, dtype=float)
-    pred_probs = np.asarray(pred_probs, dtype=float)
+    scores = np.asarray(scores, dtype=float)
 
     if y_true.size == 0:
         return np.nan
+    if not scores_are_valid_probabilities(scores):
+        return np.nan
 
-    pred_probs = np.clip(pred_probs, 0.0, 1.0)
     bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
     ece = 0.0
 
@@ -58,33 +83,35 @@ def compute_ece(y_true, pred_probs, n_bins=10):
         lower = bin_edges[idx]
         upper = bin_edges[idx + 1]
         if idx == n_bins - 1:
-            mask = (pred_probs >= lower) & (pred_probs <= upper)
+            mask = (scores >= lower) & (scores <= upper)
         else:
-            mask = (pred_probs >= lower) & (pred_probs < upper)
+            mask = (scores >= lower) & (scores < upper)
 
         if not np.any(mask):
             continue
 
         bin_accuracy = y_true[mask].mean()
-        bin_confidence = pred_probs[mask].mean()
+        bin_confidence = scores[mask].mean()
         ece += np.abs(bin_accuracy - bin_confidence) * mask.mean()
 
     return float(ece)
 
 
-def compute_brier_score(y_true, pred_probs):
+def compute_brier_score(y_true, scores):
     y_true = np.asarray(y_true)
-    pred_probs = np.asarray(pred_probs)
+    scores = np.asarray(scores)
     if y_true.size == 0:
         return np.nan
-    return float(brier_score_loss(y_true, pred_probs))
+    if not scores_are_valid_probabilities(scores):
+        return np.nan
+    return float(brier_score_loss(y_true, scores))
 
 
-def compute_auroc(y_true, pred_probs):
+def compute_auroc(y_true, scores):
     y_true = np.asarray(y_true)
-    pred_probs = np.asarray(pred_probs)
+    scores = np.asarray(scores)
     try:
-        return float(roc_auc_score(y_true, pred_probs))
+        return float(roc_auc_score(y_true, scores))
     except ValueError:
         return np.nan
 
@@ -102,48 +129,55 @@ class Metrics:
         self.tpr_fpr_target = tpr_fpr_target
         self.ece_bins = ece_bins
         self.comparison_name = comparison_name
-        self.metadata = metadata or {}
+        self.metadata = drop_deprecated_summary_keys(metadata)
+        self.scores = np.asarray(get_prediction_scores(self.preds), dtype=float)
+        self.scores_are_probabilities = bool(
+            getattr(self.preds, "scores_are_probabilities", False)
+        ) and scores_are_valid_probabilities(self.scores)
 
         self.auroc = self._safe_auroc()
         self.tpr_at_fpr = compute_tpr_at_fpr(
             self.preds.true_labels,
-            self.preds.pred_probs,
+            self.scores,
             target_fpr=self.tpr_fpr_target,
         )
-        self.tpr_at_1pct_fpr = compute_tpr_at_fpr(
-            self.preds.true_labels,
-            self.preds.pred_probs,
-            target_fpr=0.01,
-        )
-        self.ece = compute_ece(
-            self.preds.true_labels,
-            self.preds.pred_probs,
-            n_bins=self.ece_bins,
-        )
-        self.brier = compute_brier_score(self.preds.true_labels, self.preds.pred_probs)
 
         # Legacy fields kept for compatibility with earlier notebooks/scripts.
-        self.f1 = f1_score(self.preds.true_labels, self.preds.predicted_labels)
-        self.recall = recall_score(self.preds.true_labels, self.preds.predicted_labels)
+        self.f1 = f1_score(
+            self.preds.true_labels,
+            self.preds.predicted_labels,
+            zero_division=0,
+        )
+        self.precision = precision_score(
+            self.preds.true_labels,
+            self.preds.predicted_labels,
+            zero_division=0,
+        )
+        self.recall = recall_score(
+            self.preds.true_labels,
+            self.preds.predicted_labels,
+            zero_division=0,
+        )
+        self.accuracy = accuracy_score(self.preds.true_labels, self.preds.predicted_labels)
+        self.balanced_accuracy = balanced_accuracy_score(
+            self.preds.true_labels,
+            self.preds.predicted_labels,
+        )
 
     def _safe_auroc(self):
-        return compute_auroc(self.preds.true_labels, self.preds.pred_probs)
+        return compute_auroc(self.preds.true_labels, self.scores)
 
     def __str__(self):
         return (
             f"AUROC: {self.auroc:.4f}, "
-            f"TPR@{self.tpr_fpr_target:.0%}FPR: {self.tpr_at_fpr:.4f}, "
-            f"ECE: {self.ece:.4f}, "
-            f"Brier: {self.brier:.4f}"
+            f"TPR@{self.tpr_fpr_target:.0%}FPR: {self.tpr_at_fpr:.4f}"
         )
 
     def __repr__(self):
         return (
             "Metrics("
             f"auroc={self.auroc:.4f}, "
-            f"tpr_at_fpr={self.tpr_at_fpr:.4f}, "
-            f"ece={self.ece:.4f}, "
-            f"brier={self.brier:.4f})"
+            f"tpr_at_fpr={self.tpr_at_fpr:.4f})"
         )
 
     def summary(self):
@@ -151,11 +185,13 @@ class Metrics:
             "comparison_name": self.comparison_name,
             "auroc": self.auroc,
             "tpr_at_fpr": self.tpr_at_fpr,
-            "tpr_at_1pct_fpr": self.tpr_at_1pct_fpr,
-            "ece": self.ece,
-            "brier": self.brier,
+            "scores_are_probabilities": self.scores_are_probabilities,
+            "f1": self.f1,
+            "precision": self.precision,
+            "recall": self.recall,
+            "accuracy": self.accuracy,
+            "balanced_accuracy": self.balanced_accuracy,
             "tpr_fpr_target": self.tpr_fpr_target,
-            "ece_bins": self.ece_bins,
         }
         summary.update(self.metadata)
         return summary
@@ -164,9 +200,6 @@ class Metrics:
         return {
             "delta_auroc": self.auroc - baseline.auroc,
             "delta_tpr_at_fpr": self.tpr_at_fpr - baseline.tpr_at_fpr,
-            "delta_tpr_at_1pct_fpr": self.tpr_at_1pct_fpr - baseline.tpr_at_1pct_fpr,
-            "delta_ece": self.ece - baseline.ece,
-            "delta_brier": self.brier - baseline.brier,
         }
 
     def get_classification_indices(self):
@@ -192,7 +225,7 @@ class Metrics:
         """
         Returns classification indices based on a custom probability threshold.
         """
-        pred_probs = np.array(self.preds.pred_probs)
+        pred_probs = np.array(get_prediction_scores(self.preds))
         true_labels = np.array(self.preds.true_labels)
 
         predicted_labels = (pred_probs >= threshold).astype(int)
@@ -216,7 +249,7 @@ class Metrics:
         """
         Legacy helper retained for backward compatibility with older scripts.
         """
-        thresholded_preds = [1 if prob >= threshold else 0 for prob in self.preds.pred_probs]
+        thresholded_preds = [1 if score >= threshold else 0 for score in get_prediction_scores(self.preds)]
         self.f1 = f1_score(self.preds.true_labels, thresholded_preds)
         self.recall = recall_score(self.preds.true_labels, thresholded_preds)
         self.auroc = self._safe_auroc()
@@ -225,7 +258,7 @@ class Metrics:
         """
         Legacy helper retained for backward compatibility with older scripts.
         """
-        thresholded_preds = [1 if prob >= threshold else 0 for prob in self.preds.pred_probs]
+        thresholded_preds = [1 if score >= threshold else 0 for score in get_prediction_scores(self.preds)]
         for i, error_prob in enumerate(self.preds.error_probs):
             if error_prob >= self.preds.error_threshold:
                 thresholded_preds[i] = 1 - thresholded_preds[i]
@@ -237,7 +270,7 @@ class Metrics:
         """
         Legacy helper retained for backward compatibility with older scripts.
         """
-        base_probs = np.array(self.preds.pred_probs)
+        base_probs = np.array(get_prediction_scores(self.preds))
         final_preds = (base_probs >= threshold).astype(int)
 
         err = np.array(self.preds.error_probs)
@@ -256,19 +289,33 @@ class Metrics:
     def from_arrays(
         cls,
         true_labels,
-        pred_probs,
+        pred_probs=None,
         predicted_labels=None,
         ids=None,
+        scores=None,
+        raw_scores=None,
+        default_threshold=0.5,
+        score_direction="higher_is_ai",
+        scores_are_probabilities=None,
         **kwargs,
     ):
-        pred_probs = np.asarray(pred_probs, dtype=float)
+        if scores is None:
+            scores = pred_probs
+        scores = np.asarray(scores, dtype=float)
+        if pred_probs is not None:
+            pred_probs = np.asarray(pred_probs, dtype=float).tolist()
         if predicted_labels is None:
-            predicted_labels = (pred_probs >= 0.5).astype(int).tolist()
+            predicted_labels = (scores >= default_threshold).astype(int).tolist()
 
         preds = Predictions(
             predicted_labels=predicted_labels,
             true_labels=np.asarray(true_labels, dtype=int).tolist(),
-            pred_probs=pred_probs.tolist(),
+            pred_probs=pred_probs,
+            scores=scores.tolist(),
+            raw_scores=raw_scores,
+            default_threshold=default_threshold,
+            score_direction=score_direction,
+            scores_are_probabilities=scores_are_probabilities,
         )
         if ids is not None:
             preds.set_ids(list(ids))
@@ -282,9 +329,31 @@ class Metrics:
 
         true_labels = data["true_labels"].tolist()
         predicted_labels = data["predicted_labels"].tolist()
-        pred_probs = data["pred_probs"].tolist()
+        pred_probs = data["pred_probs"].tolist() if "pred_probs" in data else None
+        scores = data["scores"].tolist() if "scores" in data else pred_probs
+        raw_scores = data["raw_scores"].tolist() if "raw_scores" in data else scores
+        default_threshold = (
+            data["default_threshold"].item() if "default_threshold" in data else 0.5
+        )
+        score_direction = (
+            data["score_direction"].item() if "score_direction" in data else "higher_is_ai"
+        )
+        scores_are_probabilities = (
+            bool(data["scores_are_probabilities"].item())
+            if "scores_are_probabilities" in data
+            else None
+        )
 
-        preds = Predictions(predicted_labels, true_labels, pred_probs)
+        preds = Predictions(
+            predicted_labels=predicted_labels,
+            true_labels=true_labels,
+            pred_probs=pred_probs,
+            scores=scores,
+            raw_scores=raw_scores,
+            default_threshold=default_threshold,
+            score_direction=score_direction,
+            scores_are_probabilities=scores_are_probabilities,
+        )
         if "ids" in data:
             preds.set_ids(data["ids"].tolist())
 
@@ -324,19 +393,22 @@ class Metrics:
             "dataset_name": dataset_name,
             "auroc": self.auroc,
             "tpr_at_fpr": self.tpr_at_fpr,
-            "tpr_at_1pct_fpr": self.tpr_at_1pct_fpr,
-            "ece": self.ece,
-            "brier": self.brier,
+            "scores_are_probabilities": self.scores_are_probabilities,
             "tpr_fpr_target": self.tpr_fpr_target,
-            "ece_bins": self.ece_bins,
         }
         metadata.update(self.metadata)
 
+        log.info(f"Saving metrics to {file_path} with metadata: {metadata}")
         np.savez(
             file_path,
             true_labels=self.preds.true_labels,
             predicted_labels=self.preds.predicted_labels,
             pred_probs=self.preds.pred_probs,
+            scores=get_prediction_scores(self.preds),
+            raw_scores=getattr(self.preds, "raw_scores", get_prediction_scores(self.preds)),
+            default_threshold=getattr(self.preds, "default_threshold", 0.5),
+            score_direction=getattr(self.preds, "score_direction", "higher_is_ai"),
+            scores_are_probabilities=getattr(self.preds, "scores_are_probabilities", False),
             ids=getattr(self.preds, "ids", []),
             metadata=json.dumps(metadata),
         )
@@ -347,6 +419,17 @@ class Metrics:
         npz_files = [os.path.join(folder, name) for name in os.listdir(folder) if name.endswith(".npz")]
         for npz_file in npz_files:
             metrics.append(Metrics.load_from_file(npz_file))
+        return metrics
+
+
+    @staticmethod
+    def load_metrics_of_detector(folder, detector_name) -> List["Metrics"]:
+        metrics: List["Metrics"] = []
+        npz_files = [os.path.join(folder, name) for name in os.listdir(folder) if name.endswith(".npz")]
+        for npz_file in npz_files:
+            metric = Metrics.load_from_file(npz_file)
+            if metric.metadata.get("detector_name") == detector_name:
+                metrics.append(metric)
         return metrics
 
     @staticmethod
@@ -370,3 +453,53 @@ class Metrics:
         for metric in metrics:
             rows.append(metric.summary())
         return pd.DataFrame(rows)
+
+
+def filter_metrics_by_target_regime(metrics: List[Metrics], target_regime: str) -> List[Metrics]:
+    target_regime = target_regime.lower()
+
+    return [
+        m for m in metrics
+        if str(m.metadata.get("target_regime", "")).lower() == target_regime
+        or str(m.comparison_name).lower().startswith(target_regime)
+    ]
+
+def metric_block_key(m: Metrics):
+    return (
+        m.metadata.get("dataset_name"),
+        m.metadata.get("generator_name"),
+        m.metadata.get("detector_name"),
+    )
+
+def align_metric_blocks(
+    baseline_metrics: List[Metrics],
+    target_metrics: List[Metrics],
+):
+    baseline_by_key = {
+        metric_block_key(m): m
+        for m in baseline_metrics
+    }
+
+    target_by_key = {
+        metric_block_key(m): m
+        for m in target_metrics
+    }
+
+    common_keys = sorted(set(baseline_by_key) & set(target_by_key))
+
+    if not common_keys:
+        raise ValueError("No common dataset × generator blocks between baseline and target.")
+
+    missing_target = sorted(set(baseline_by_key) - set(target_by_key))
+    missing_baseline = sorted(set(target_by_key) - set(baseline_by_key))
+
+    if missing_target:
+        print(f"WARNING: target missing blocks: {missing_target}")
+
+    if missing_baseline:
+        print(f"WARNING: baseline missing blocks: {missing_baseline}")
+
+    aligned_baseline = [baseline_by_key[k] for k in common_keys]
+    aligned_target = [target_by_key[k] for k in common_keys]
+
+    return aligned_baseline, aligned_target

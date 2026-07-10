@@ -1,4 +1,4 @@
-def get_prompt(cfg):
+def get_prompt(free_llm_text):
     return f"""Rewrite the following text in fluent natural English.
 
 Constraints:
@@ -10,5 +10,5 @@ Constraints:
 - Return only the rewritten text.
 
 Text:
-{cfg.free_llm_text}
+{free_llm_text}
 """

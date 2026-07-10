@@ -42,13 +42,14 @@ def get_data_loader(dataset, tokenizer, tokenized_fn, batch_size=32):
 
 
 
-def predict_batch(data_loader, model, device, should_negate):
+def predict_batch(data_loader, model, device, inverse_labels=False):
     """
     Runs batch inference using a DataLoader.
     """
     predicted_labels = []
     true_labels = []
-    pred_probs = []
+    scores = []
+    raw_scores = []
     
     with torch.no_grad():
         for batch in tqdm(data_loader, desc="Processing batches"):
@@ -58,8 +59,9 @@ def predict_batch(data_loader, model, device, should_negate):
             try:
                 outputs = model(**inputs)
                 logits = outputs.logits
-                preds = torch.argmax(logits, dim=-1).cpu().tolist()  # Get predicted class labels
-                probs = torch.nn.functional.softmax(logits, dim=-1)[:, 1].cpu().tolist()  # Get probability of class 1
+                class_1_probs = torch.nn.functional.softmax(logits, dim=-1)[:, 1].cpu().numpy()
+                ai_scores = 1.0 - class_1_probs if inverse_labels else class_1_probs
+                preds = (ai_scores >= 0.5).astype(int).tolist()
 
             except RuntimeError as e:
                 print(f"CUDA ERROR: {e}")
@@ -70,25 +72,20 @@ def predict_batch(data_loader, model, device, should_negate):
 
             predicted_labels.extend(preds)
             true_labels.extend(labels)
-            pred_probs.extend(probs)
-    return Predictions(predicted_labels, true_labels, pred_probs, should_negate)
+            raw_scores.extend(ai_scores.tolist())
+            scores.extend(ai_scores.tolist())
 
-
-def sigmoid(x):
-    return 1.0 / (1.0 + np.exp(-x))
-
-
-def binoculars_score_to_machine_probability(scores, threshold, temperature):
-    """
-    Converts raw Binoculars scores into a machine-likeness score.
-
-    Lower Binoculars scores indicate stronger AI-generation evidence, so we map
-    the configured threshold to 0.5 and keep the transform monotonic.
-    """
-    scores = np.asarray(scores, dtype=float)
-    temperature = max(float(temperature), 1e-6)
-    logits = (threshold - scores) / temperature
-    return sigmoid(logits)
+    return Predictions(
+        predicted_labels=predicted_labels,
+        true_labels=true_labels,
+        pred_probs=scores,
+        scores=scores,
+        raw_scores=raw_scores,
+        default_threshold=0.5,
+        score_direction="higher_is_ai",
+        scores_are_probabilities=True,
+        metadata={"inverse_labels": bool(inverse_labels)},
+    )
 
 
 def get_batch_size(cfg):
@@ -96,6 +93,10 @@ def get_batch_size(cfg):
 
 
 def get_binoculars_batch_size(cfg):
+    return int(getattr(cfg.detector, "batch_size", get_batch_size(cfg)))
+
+
+def get_fastdetectgpt_batch_size(cfg):
     return int(getattr(cfg.detector, "batch_size", get_batch_size(cfg)))
 
 
@@ -123,20 +124,19 @@ class BinocularsDetectorModel:
         binoculars_detector,
         batch_size=8,
         score_threshold=0.8536432310785527,
-        probability_temperature=0.05,
     ):
         ensure_determinism()
         self.detector = binoculars_detector
         self.batch_size = batch_size
         self.score_threshold = float(score_threshold)
-        self.probability_temperature = float(probability_temperature)
 
     def predict(self, dataset: Dataset):
         assert len(dataset["id"]) == len(set(dataset["id"])), "Duplicate IDS!"
 
         predicted_labels = []
         true_labels = []
-        pred_probs = []
+        raw_scores = []
+        scores = []
 
         texts = dataset["text"]
         labels = dataset["label"]
@@ -148,18 +148,24 @@ class BinocularsDetectorModel:
             stop = min(start + self.batch_size, len(texts))
             batch_texts = texts[start:stop]
             batch_scores = self.detector.compute_score(batch_texts)
-            batch_probs = binoculars_score_to_machine_probability(
-                batch_scores,
-                threshold=self.score_threshold,
-                temperature=self.probability_temperature,
-            )
+            batch_scores = np.asarray(batch_scores, dtype=float)
+            batch_normalized_scores = -batch_scores
             batch_preds = (np.asarray(batch_scores, dtype=float) < self.score_threshold).astype(int)
 
             predicted_labels.extend(batch_preds.tolist())
             true_labels.extend(labels[start:stop])
-            pred_probs.extend(batch_probs.tolist())
+            raw_scores.extend(batch_scores.tolist())
+            scores.extend(batch_normalized_scores.tolist())
 
-        predictions = Predictions(predicted_labels, true_labels, pred_probs)
+        predictions = Predictions(
+            predicted_labels=predicted_labels,
+            true_labels=true_labels,
+            scores=scores,
+            raw_scores=raw_scores,
+            default_threshold=-self.score_threshold,
+            score_direction="lower_is_ai",
+            scores_are_probabilities=False,
+        )
         predictions.set_ids(list(dataset["id"]))
         return predictions
 
@@ -173,13 +179,89 @@ def load_binoculars_detector(cfg):
         use_bfloat16=getattr(cfg.detector, "use_bfloat16", True),
         max_token_observed=getattr(cfg.detector, "max_token_observed", 512),
         mode=getattr(cfg.detector, "mode", "low-fpr"),
+        trust_remote_code=getattr(cfg.detector, "trust_remote_code", False),
     )
 
     return BinocularsDetectorModel(
         detector,
         batch_size=get_binoculars_batch_size(cfg),
         score_threshold=getattr(cfg.detector, "score_threshold", detector.threshold),
-        probability_temperature=getattr(cfg.detector, "probability_temperature", 0.05),
+    )
+
+
+class FastDetectGPTDetectorModel:
+    def __init__(
+        self,
+        detector,
+        batch_size=1,
+        score_threshold=0.0,
+        inverse_labels=False,
+    ):
+        ensure_determinism()
+        self.detector = detector
+        self.batch_size = int(batch_size)
+        self.score_threshold = float(score_threshold)
+        self.inverse_labels = inverse_labels
+
+    def predict(self, dataset: Dataset):
+        assert len(dataset["id"]) == len(set(dataset["id"])), "Duplicate IDS!"
+
+        predicted_labels = []
+        true_labels = []
+        scores = []
+        raw_scores = []
+
+        texts = dataset["text"]
+        labels = dataset["label"]
+
+        for start in tqdm(
+            range(0, len(texts), self.batch_size),
+            desc="Processing FastDetectGPT batches",
+        ):
+            stop = min(start + self.batch_size, len(texts))
+            batch_texts = texts[start:stop]
+            batch_scores = self.detector.compute_score(batch_texts)
+            batch_scores = np.asarray(batch_scores, dtype=float)
+            batch_preds = (np.asarray(batch_scores, dtype=float) >= self.score_threshold).astype(int)
+
+            raw_scores.extend(batch_scores.tolist())
+            scores.extend(batch_scores.tolist())
+            predicted_labels.extend(batch_preds.tolist())
+            true_labels.extend(labels[start:stop])
+
+        predictions = Predictions(
+            predicted_labels=predicted_labels,
+            true_labels=true_labels,
+            scores=scores,
+            raw_scores=raw_scores,
+            default_threshold=self.score_threshold,
+            score_direction="higher_is_ai",
+            scores_are_probabilities=False,
+            metadata={"inverse_labels": bool(self.inverse_labels)},
+        )
+        predictions.set_ids(list(dataset["id"]))
+        return predictions
+
+
+def load_fastdetectgpt_detector(cfg):
+    from utils.fastdetectgpt import FastDetectGPT
+
+    detector = FastDetectGPT(
+        sampling_model_name_or_path=cfg.detector.sampling_model_name_or_path,
+        scoring_model_name_or_path=cfg.detector.scoring_model_name_or_path,
+        max_token_observed=getattr(cfg.detector, "max_token_observed", 512),
+        dtype=getattr(cfg.detector, "dtype", "bf16"),
+        quantization=getattr(cfg.detector, "quantization", "none"),
+        trust_remote_code=getattr(cfg.detector, "trust_remote_code", False),
+        device_map=getattr(cfg.detector, "device_map", "auto"),
+        local_files_only=getattr(cfg.detector, "local_files_only", False),
+    )
+
+    return FastDetectGPTDetectorModel(
+        detector,
+        batch_size=get_fastdetectgpt_batch_size(cfg),
+        score_threshold=getattr(cfg.detector, "score_threshold", 0.0),
+        inverse_labels=getattr(cfg.detector, "inverse_labels", False),
     )
 
 
@@ -256,6 +338,8 @@ def load_detector_model(cfg):
     detector_type = getattr(cfg.detector, "detector_type", "sequence_classifier")
     if detector_type == "binoculars":
         return load_binoculars_detector(cfg)
+    if detector_type == "fastdetectgpt":
+        return load_fastdetectgpt_detector(cfg)
     return load_sequence_classifier_detector(cfg)
 
 # class RadarModel(DetectorModel):

@@ -17,6 +17,8 @@ runtime:
   resume: true
   log_level: info
 
+
+machine_postfix: h2l
 # hydra:
 #   run:
 #     dir: ${paths.output_dir}/hydra/${now:%Y-%m-%d_%H-%M-%S}

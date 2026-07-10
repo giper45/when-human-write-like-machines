@@ -1,10 +1,11 @@
 detector_type: binoculars
 observer_name_or_path: tiiuae/falcon-7b
 performer_name_or_path: tiiuae/falcon-7b-instruct
+model_name: binoculars-falcon-7b
 mode: low-fpr
 score_threshold: 0.8536432310785527
-probability_temperature: 0.05
 max_token_observed: 512
 use_bfloat16: true
+trust_remote_code: false
 batch_size: 1
 inverse_labels: false

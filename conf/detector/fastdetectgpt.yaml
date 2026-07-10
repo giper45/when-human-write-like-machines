@@ -1,0 +1,17 @@
+detector_type: fastdetectgpt
+model_name: FastDetectGPT
+
+sampling_model_name_or_path: ${oc.env:FASTDETECTGPT_SAMPLING_MODEL,meta-llama/Meta-Llama-3-8B}
+scoring_model_name_or_path: ${oc.env:FASTDETECTGPT_SCORING_MODEL,meta-llama/Meta-Llama-3-8B-Instruct}
+
+max_token_observed: 512
+batch_size: 1
+
+dtype: bf16
+quantization: ${oc.env:FASTDETECTGPT_QUANTIZATION,none}
+device_map: auto
+trust_remote_code: false
+local_files_only: false
+
+score_threshold: 0.0
+inverse_labels: false

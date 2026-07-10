@@ -1,21 +1,22 @@
 experiment:
   name: main
-  seed: 42
 
 is_pilot: false
 batch_size: 32
+seed: 42
 
 paths:
+  generated_dir: generated-texts
+  sampled_file: ${experiment.paths.generated_dir}/${dataset.name}_sampled
+  machine_file: ${experiment.paths.generated_dir}/${dataset.name}_${model.name}_${machine_postfix}.txt
+  results_dir: results
+  metrics_file: ${experiment.paths.results_dir}/${detector.model_name}_${dataset.name}_${model.name}_${machine_postfix}.npz
   output_dir: runs/main
   dataset_home_path: ${oc.env:HOME}/.datasets
   resolved_config: ${paths.output_dir}/resolved_config.yaml
-  human_sources: ${paths.output_dir}/human_sources.jsonl
-  split: ${paths.output_dir}/split.csv
-  generated_dir: ${paths.output_dir}/generated
   validated: ${paths.output_dir}/validated.parquet
   quality: ${paths.output_dir}/quality.parquet
   scores: ${paths.output_dir}/scores.parquet
-  results_dir: ${paths.output_dir}/results
 
   language: en
   openwebtext_topic_max_words: 40
@@ -91,10 +92,12 @@ evaluation:
     - precision
     - recall
     - tpr_at_fpr
+
+  probabilistic_metrics:
     - ece
     - brier
 
-  fpr_targets: [0.01, 0.05, 0.10]
+  fpr_targets: [0.01]
 
   calibration_regimes:
     - free_llm
@@ -102,54 +105,6 @@ evaluation:
     - llm2l
 
   bootstrap:
-    n: 1000
+    n: 5000
     unit: sample_id
     seed: 42
-
-prompts:
-  system: |
-    You are a text rewriting and generation engine for a scientific benchmark.
-    Return only the requested text.
-    Do not add explanations, comments, markdown, headings, or prefaces.
-
-  free_llm: |
-    Write a fluent, self-contained English text about the following topic.
-
-    Constraints:
-    - Use your own wording and structure.
-    - Do not refer to the existence of a source text.
-    - Do not include headings or bullet points.
-    - Keep the length between 220 and 350 words.
-    - Return only the generated text.
-
-    Topic:
-    {topic}
-
-  h2l: |
-    Rewrite the following text in fluent natural English.
-
-    Constraints:
-    - Preserve the original meaning.
-    - Preserve factual claims, entities, and relationships.
-    - Do not add new information.
-    - Do not remove important information.
-    - Change wording and sentence structure where possible.
-    - Keep approximately the same length.
-    - Return only the rewritten text.
-
-    Text:
-    {source_text}
-
-  llm2l: |
-    Rewrite the following text in fluent natural English.
-
-    Constraints:
-    - Preserve the original meaning.
-    - Do not add new information.
-    - Do not remove important information.
-    - Change wording and sentence structure where possible.
-    - Keep approximately the same length.
-    - Return only the rewritten text.
-
-    Text:
-    {free_llm_text}
