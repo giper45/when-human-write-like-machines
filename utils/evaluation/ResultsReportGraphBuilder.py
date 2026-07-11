@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
@@ -238,6 +239,502 @@ class ResultsReportGraphBuilder:
         fig.tight_layout(pad=0.2)
         self.save_figure(fig, output_path, formats=formats)
         return fig, ax
+
+    def load_npz_metrics(self) -> pd.DataFrame:
+        """Load metric values and experiment dimensions from result metadata."""
+        rows = []
+        invalid_files = []
+        required = {"dataset_name", "generator_name", "auroc", "tpr_at_fpr"}
+
+        for path in sorted(self.results_dir.rglob("*.npz")):
+            try:
+                with np.load(path, allow_pickle=False) as result:
+                    if "metadata" not in result:
+                        raise KeyError("metadata")
+                    metadata = json.loads(result["metadata"].item())
+
+                missing = required - metadata.keys()
+                if missing:
+                    raise KeyError(", ".join(sorted(missing)))
+
+                rows.append(
+                    {
+                        "dataset": metadata["dataset_name"],
+                        "generator": metadata["generator_name"],
+                        "detector": metadata.get("detector_name"),
+                        "target_regime": metadata.get(
+                            "target_regime", metadata.get("machine_postfix")
+                        ),
+                        "auroc": float(metadata["auroc"]),
+                        "tpr_at_fpr": float(metadata["tpr_at_fpr"]),
+                        "path": path,
+                    }
+                )
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                invalid_files.append(f"{path}: {exc}")
+
+        if invalid_files:
+            details = "\n".join(invalid_files)
+            raise ValueError(f"Invalid NPZ result metadata:\n{details}")
+        if not rows:
+            raise FileNotFoundError(f"No .npz result files found under {self.results_dir}.")
+
+        return pd.DataFrame(rows)
+
+    def plot_heatmap(
+        self,
+        detector_name=None,
+        target_regime=None,
+        metrics=("auroc", "tpr_at_fpr"),
+        figsize=None,
+        annot=True,
+        fmt=".3f",
+        cmap="Blues",
+        output_path=None,
+        formats=None,
+    ):
+        """
+        Plot generator-by-dataset heatmaps from all NPZ results.
+
+        ``detector_name`` and ``target_regime`` select a single experimental
+        slice. If multiple results still map to the same cell, their metric is
+        averaged. The returned DataFrame contains the filtered, unaggregated
+        rows so this behavior remains easy to inspect.
+        """
+        frame = self.load_npz_metrics()
+        frame = self._filter_frame(
+            frame,
+            {"detector": detector_name, "target_regime": target_regime},
+        )
+        title_parts = [value for value in (detector_name, target_regime) if value]
+        title = " · ".join(map(str, title_parts)) or None
+        return self._plot_metric_heatmaps(
+            frame,
+            index="generator",
+            ylabel="Generator",
+            metrics=metrics,
+            figsize=figsize,
+            annot=annot,
+            fmt=fmt,
+            cmap=cmap,
+            title=title,
+            output_path=output_path,
+            formats=formats,
+        )
+
+    def plot_global_heatmap(
+        self,
+        target_regime=None,
+        metrics=("auroc", "tpr_at_fpr"),
+        figsize=None,
+        annot=True,
+        fmt=".3f",
+        cmap="Blues",
+        output_path=None,
+        formats=None,
+    ):
+        """
+        Plot detector-by-dataset heatmaps aggregated across generators.
+
+        By default all target regimes are included. Pass ``target_regime`` to
+        restrict the view; repeated detector-by-dataset cells are averaged.
+        """
+        frame = self.load_npz_metrics()
+        frame = self._filter_frame(frame, {"target_regime": target_regime})
+        title = f"Global · {target_regime}" if target_regime else "Global"
+        return self._plot_metric_heatmaps(
+            frame,
+            index="detector",
+            ylabel="Detector",
+            metrics=metrics,
+            figsize=figsize,
+            annot=annot,
+            fmt=fmt,
+            cmap=cmap,
+            title=title,
+            output_path=output_path,
+            formats=formats,
+        )
+
+    def plot_grid_heatmap(
+        self,
+        target_regime=None,
+        detector_names=None,
+        metrics=("auroc", "tpr_at_fpr"),
+        ncols=2,
+        figsize=None,
+        annot=True,
+        fmt=".3f",
+        cmap="Blues",
+        output_path=None,
+        formats=None,
+    ):
+        """
+        Plot a grid of detector heatmaps in one separate figure per metric.
+
+        Each panel is a generator-by-dataset heatmap for one detector. With the
+        default metrics this creates two figures, one for AUROC and one for
+        TPR@1% FPR. All panels use the same 0--1 colour scale and a shared
+        colourbar, making detector values directly comparable.
+
+        ``detector_names`` can select detectors and control their panel order.
+        The default two-column layout uses an A4 portrait figure; layouts with
+        three or more columns use A4 landscape. ``output_path`` is treated as a
+        filename stem and the metric name is appended to each saved figure.
+
+        Returns ``(figures, axes, frame)``, where the first two values are
+        dictionaries keyed by metric and ``frame`` contains the filtered,
+        unaggregated result rows.
+        """
+        plt, sns = self._require_plotting()
+        self.ensure_style()
+
+        if not isinstance(ncols, int) or isinstance(ncols, bool) or ncols < 1:
+            raise ValueError("ncols must be a positive integer.")
+
+        metrics = tuple(metrics)
+        labels = {"auroc": "AUROC", "tpr_at_fpr": "TPR@1% FPR"}
+        unknown = set(metrics) - set(labels)
+        if unknown:
+            raise ValueError(f"Unsupported heatmap metrics: {sorted(unknown)}")
+        if not metrics:
+            raise ValueError("At least one heatmap metric is required.")
+
+        frame = self.load_npz_metrics()
+        frame = self._filter_frame(frame, {"target_regime": target_regime})
+
+        if detector_names is None:
+            detectors = sorted(frame["detector"].dropna().unique(), key=str)
+        else:
+            if isinstance(detector_names, str):
+                detector_names = [detector_names]
+            detectors = list(dict.fromkeys(detector_names))
+            if not detectors:
+                raise ValueError("detector_names must contain at least one detector.")
+            available = set(frame["detector"].dropna())
+            missing = [name for name in detectors if name not in available]
+            if missing:
+                raise ValueError(
+                    "No results match the selected target regime for detectors: "
+                    f"{missing}"
+                )
+            frame = frame[frame["detector"].isin(detectors)]
+
+        if frame.empty or not detectors:
+            raise ValueError("No results match the selected filters.")
+
+        generators = sorted(frame["generator"].dropna().unique(), key=str)
+        datasets = sorted(frame["dataset"].dropna().unique(), key=str)
+        nrows = int(np.ceil(len(detectors) / ncols))
+        if figsize is None:
+            # ISO A4 dimensions in inches, switching orientation for 3xY grids.
+            figsize = (8.27, 11.69) if ncols <= 2 else (11.69, 8.27)
+
+        figures = {}
+        axes_by_metric = {}
+        for metric in metrics:
+            fig, axes = plt.subplots(
+                nrows,
+                ncols,
+                figsize=figsize,
+                squeeze=False,
+                constrained_layout=True,
+            )
+            flat_axes = axes.ravel()
+            visible_axes = []
+
+            for panel_idx, (ax, detector) in enumerate(zip(flat_axes, detectors)):
+                detector_frame = frame[frame["detector"] == detector]
+                matrix = detector_frame.pivot_table(
+                    index="generator",
+                    columns="dataset",
+                    values=metric,
+                    aggfunc="mean",
+                    sort=True,
+                ).reindex(index=generators, columns=datasets)
+
+                sns.heatmap(
+                    matrix,
+                    ax=ax,
+                    cmap=cmap,
+                    vmin=0.0,
+                    vmax=1.0,
+                    annot=annot,
+                    fmt=fmt,
+                    linewidths=0.4,
+                    linecolor="0.85",
+                    cbar=False,
+                    annot_kws={"fontsize": 6},
+                )
+                self.format_axis(
+                    ax,
+                    xlabel="Dataset"
+                    if panel_idx + ncols >= len(detectors)
+                    else "",
+                    ylabel="Generator" if panel_idx % ncols == 0 else "",
+                    title=str(detector),
+                    grid_axis=None,
+                )
+                ax.tick_params(axis="x", rotation=35)
+                ax.tick_params(axis="y", rotation=0)
+                visible_axes.append(ax)
+
+            for ax in flat_axes[len(detectors) :]:
+                ax.set_visible(False)
+
+            colorbar = fig.colorbar(
+                visible_axes[0].collections[0],
+                ax=visible_axes,
+                location="right",
+                shrink=0.8,
+                pad=0.02,
+            )
+            colorbar.set_label(labels[metric])
+            title = labels[metric]
+            if target_regime is not None:
+                title = f"{title} · {target_regime}"
+            fig.suptitle(title)
+
+            if output_path is not None:
+                metric_path = Path(output_path).with_name(
+                    f"{Path(output_path).stem}_{metric}"
+                )
+                self.save_figure(fig, metric_path, formats=formats)
+
+            figures[metric] = fig
+            axes_by_metric[metric] = axes
+
+        return figures, axes_by_metric, frame
+
+    def plot_detection_gap_barplot(
+        self,
+        detector_names=None,
+        regimes=("free_llm", "llm2l", "h2l"),
+        n_bootstrap=5000,
+        random_seed=42,
+        alpha=0.05,
+        figsize=(7.1, 3.6),
+        title="Figure 3 — H2L vs LLM2L detection gap",
+        output_path=None,
+        formats=None,
+        hatches=("", "///", "xx"),
+    ):
+        """Plot detector-level mean TPR@1% FPR with bootstrap confidence intervals.
+
+        Predictions are bootstrapped within each dataset-by-generator block,
+        then the block results are averaged at detector level. One grouped bar
+        is drawn per regime and asymmetric percentile confidence intervals are
+        shown using ``alpha`` (95% by default).
+
+        Returns ``(fig, ax, summary_frame)``. The summary contains one row per
+        detector and regime with the plotted mean, CI bounds, and block count.
+        """
+        from utils.evaluation.BootstrapMetrics import bootstrap_metrics_for_detector
+        from utils.evaluation.Metrics import (
+            Metrics,
+            filter_metrics_by_target_regime,
+        )
+
+        plt, sns = self._require_plotting()
+        self.ensure_style()
+
+        if not isinstance(n_bootstrap, int) or isinstance(n_bootstrap, bool) or n_bootstrap < 1:
+            raise ValueError("n_bootstrap must be a positive integer.")
+        if not 0.0 < alpha < 1.0:
+            raise ValueError("alpha must be between 0 and 1.")
+
+        regimes = tuple(regimes)
+        regime_labels = {
+            "free_llm": "FreeLLM",
+            "llm2l": "LLM2L",
+            "h2l": "H2L",
+        }
+        unknown_regimes = set(regimes) - set(regime_labels)
+        if unknown_regimes:
+            raise ValueError(f"Unsupported detection regimes: {sorted(unknown_regimes)}")
+        if not regimes:
+            raise ValueError("At least one detection regime is required.")
+
+        available_frame = self.load_npz_metrics()
+        if detector_names is None:
+            detectors = sorted(available_frame["detector"].dropna().unique(), key=str)
+        else:
+            if isinstance(detector_names, str):
+                detector_names = [detector_names]
+            detectors = list(dict.fromkeys(detector_names))
+        if not detectors:
+            raise ValueError("detector_names must contain at least one detector.")
+
+        available_detectors = set(available_frame["detector"].dropna())
+        missing_detectors = [name for name in detectors if name not in available_detectors]
+        if missing_detectors:
+            raise ValueError(f"No results found for detectors: {missing_detectors}")
+
+        rows = []
+        for detector in detectors:
+            detector_metrics = Metrics.load_metrics_of_detector(self.results_dir, detector)
+            for regime in regimes:
+                regime_metrics = filter_metrics_by_target_regime(detector_metrics, regime)
+                if not regime_metrics:
+                    raise ValueError(f"No {regime} results found for detector {detector}.")
+
+                bootstrap = bootstrap_metrics_for_detector(
+                    regime_metrics,
+                    n_bootstrap=n_bootstrap,
+                    random_seed=random_seed,
+                )
+                summary = bootstrap.summary(alpha=alpha)
+                rows.append(
+                    {
+                        "detector": detector,
+                        "target_regime": regime,
+                        "regime": regime_labels[regime],
+                        "mean_tpr_at_fpr": summary["tpr_at_fpr_mean"],
+                        "tpr_ci_low": summary["tpr_at_fpr_ci_low"],
+                        "tpr_ci_high": summary["tpr_at_fpr_ci_high"],
+                        "n_blocks": len(regime_metrics),
+                        "n_bootstrap": n_bootstrap,
+                        "alpha": alpha,
+                    }
+                )
+
+        summary_frame = pd.DataFrame(rows)
+        hue_order = [regime_labels[regime] for regime in regimes]
+        palette = self.get_colorblind_palette(len(hue_order))
+        fig, ax = plt.subplots(figsize=figsize)
+        sns.barplot(
+            data=summary_frame,
+            x="detector",
+            y="mean_tpr_at_fpr",
+            hue="regime",
+            order=detectors,
+            hue_order=hue_order,
+            palette=palette,
+            estimator="mean",
+            errorbar=None,
+            edgecolor="0.15",
+            linewidth=0.5,
+            ax=ax,
+        )
+        self.apply_bar_hatches(ax, hatches=hatches, hue_levels=hue_order)
+        self._add_ci_error_bars(
+            ax,
+            summary_frame,
+            x="detector",
+            y="mean_tpr_at_fpr",
+            hue="regime",
+            order=detectors,
+            hue_order=hue_order,
+            ci_low="tpr_ci_low",
+            ci_high="tpr_ci_high",
+        )
+        self.format_axis(
+            ax,
+            xlabel="Detector",
+            ylabel="Mean TPR@1% FPR",
+            title=title,
+            grid_axis="y",
+        )
+        ax.set_ylim(0.0, 1.0)
+        ax.tick_params(axis="x", rotation=20)
+        ax.legend(
+            title=None,
+            frameon=False,
+            ncols=len(hue_order),
+            loc="lower center",
+            bbox_to_anchor=(0.5, 1.0),
+        )
+        ax.set_title(title, pad=31)
+        fig.tight_layout(pad=0.3)
+
+        if output_path is not None:
+            self.save_figure(fig, output_path, formats=formats)
+        return fig, ax, summary_frame
+
+    def _plot_metric_heatmaps(
+        self,
+        frame,
+        index,
+        ylabel,
+        metrics,
+        figsize,
+        annot,
+        fmt,
+        cmap,
+        title,
+        output_path,
+        formats,
+    ):
+        """Render one dataset heatmap per metric from a filtered result frame."""
+        plt, sns = self._require_plotting()
+        self.ensure_style()
+
+        if frame.empty:
+            raise ValueError("No results match the selected filters.")
+
+        metrics = tuple(metrics)
+        labels = {"auroc": "AUROC", "tpr_at_fpr": "TPR@1% FPR"}
+        unknown = set(metrics) - set(labels)
+        if unknown:
+            raise ValueError(f"Unsupported heatmap metrics: {sorted(unknown)}")
+        if not metrics:
+            raise ValueError("At least one heatmap metric is required.")
+
+        n_datasets = frame["dataset"].nunique()
+        n_rows = frame[index].nunique()
+        if figsize is None:
+            figsize = (
+                max(3.2 * len(metrics), 1.25 * n_datasets * len(metrics)),
+                max(2.4, 0.55 * n_rows + 1.2),
+            )
+
+        fig, axes = plt.subplots(
+            1,
+            len(metrics),
+            figsize=figsize,
+            squeeze=False,
+            sharey=True,
+        )
+        axes = axes.ravel()
+
+        for ax, metric in zip(axes, metrics):
+            matrix = frame.pivot_table(
+                index=index,
+                columns="dataset",
+                values=metric,
+                aggfunc="mean",
+                sort=True,
+            )
+            sns.heatmap(
+                matrix,
+                ax=ax,
+                cmap=cmap,
+                vmin=0.0,
+                vmax=1.0,
+                annot=annot,
+                fmt=fmt,
+                linewidths=0.4,
+                linecolor="0.85",
+                cbar_kws={"label": labels[metric]},
+                annot_kws={"fontsize": 7},
+            )
+            self.format_axis(
+                ax,
+                xlabel="Dataset",
+                ylabel=ylabel if ax is axes[0] else None,
+                title=labels[metric],
+                grid_axis=None,
+            )
+            ax.tick_params(axis="x", rotation=35)
+            ax.tick_params(axis="y", rotation=0)
+
+        if title:
+            fig.suptitle(title, y=1.02)
+        fig.tight_layout(pad=0.4)
+
+        if output_path is not None:
+            self.save_figure(fig, output_path, formats=formats)
+        return fig, axes, frame
 
     def plot_grouped_delta_barplot(
         self,
@@ -493,4 +990,30 @@ class ResultsReportGraphBuilder:
         return result
 
 
-__all__ = ["ResultsReportGraphBuilder"]
+def plot_heatmap(results_dir, **kwargs):
+    """Convenience wrapper for :meth:`ResultsReportGraphBuilder.plot_heatmap`."""
+    return ResultsReportGraphBuilder(results_dir=results_dir).plot_heatmap(**kwargs)
+
+
+def plot_grid_heatmap(results_dir, **kwargs):
+    """Plot one grid of detector heatmaps per metric from NPZ results."""
+    return ResultsReportGraphBuilder(results_dir=results_dir).plot_grid_heatmap(**kwargs)
+
+
+def plot_detection_gap_barplot(results_dir, **kwargs):
+    """Plot the detector-level FreeLLM, LLM2L, and H2L TPR comparison."""
+    return ResultsReportGraphBuilder(results_dir=results_dir).plot_detection_gap_barplot(**kwargs)
+
+
+def plot_global_heatmap(results_dir, **kwargs):
+    """Plot global detector-by-dataset heatmaps from NPZ results."""
+    return ResultsReportGraphBuilder(results_dir=results_dir).plot_global_heatmap(**kwargs)
+
+
+__all__ = [
+    "ResultsReportGraphBuilder",
+    "plot_detection_gap_barplot",
+    "plot_global_heatmap",
+    "plot_grid_heatmap",
+    "plot_heatmap",
+]

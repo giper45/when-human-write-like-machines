@@ -36,12 +36,12 @@ def clean_up(file_handler: FileHandler):
 def main(cfg: DictConfig) -> None:
     system_prompt = system.get_system_prompt()
 
-    output_name = f"output/{cfg.dataset.name}_{cfg.model.name}_llmfree.txt"
+    output_name = f"output/{cfg.dataset.name}_{cfg.model.name}_freellm.txt"
     if FileHandler.exists(output_name):
         print(f"Output file {output_name} already exists. Exiting to avoid overwriting.")
         return
     else:
-        file_handler = FileHandler(f"output/{cfg.dataset.name}_{cfg.model.name}_freellm.txt", 'w')
+        file_handler = FileHandler(output_name, 'w')
         atexit.register(clean_up, file_handler)  # <--- Registra la funzione di clean-up per essere eseguita alla chiusura dello script
         model_id = cfg.model.model_id
         dataset = load_from_disk(f"output/{cfg.dataset.name}_sampled")
@@ -78,4 +78,3 @@ def main(cfg: DictConfig) -> None:
 
 if __name__ == "__main__":
     main()
-

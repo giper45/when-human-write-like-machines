@@ -22,16 +22,19 @@ def is_pilot(cfg):
 
 from pathlib import Path
 
-def list_hydra_group_options(config_dir: str, group: str) -> list[str]:
+def list_hydra_group_options(config_dir: str, group: str, exclude_group_names: Optional[List[str]] = None) -> list[str]:
     group_dir = Path(config_dir) / group
 
     if not group_dir.exists():
         raise FileNotFoundError(f"Config group not found: {group_dir}")
 
+    if exclude_group_names is None:
+        exclude_group_names = []
+
     return sorted(
         p.stem
         for p in group_dir.glob("*.yaml")
-        if not p.name.startswith("_")
+        if not p.name.startswith("_") and p.stem not in exclude_group_names
     )
 
 from pathlib import Path

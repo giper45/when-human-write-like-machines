@@ -16,7 +16,22 @@ from utils.evaluation.Metrics import (
     specificity_score,
 )
 from utils.evaluation.Predictions import Predictions
-from utils.evaluation.ResultsReportGraphBuilder import ResultsReportGraphBuilder
+from utils.evaluation.ResultsReportGraphBuilder import (
+    ResultsReportGraphBuilder,
+    plot_detection_gap_barplot,
+    plot_global_heatmap,
+    plot_grid_heatmap,
+    plot_heatmap,
+)
+from utils.evaluation.ScoreAnalyzer import ScoreAnalyzer
+from utils.evaluation.TextAnalyzer import (
+    TextAnalyzer,
+    lexical_jaccard,
+    normalized_token_edit_distance,
+    token_edit_distance,
+    word_ratio,
+    wordration,
+)
 from utils.evaluation.evaluation import (
     build_predictions_for_comparison,
     choose_positive_regime,
@@ -40,6 +55,13 @@ __all__ = [
     "Metrics",
     "Predictions",
     "ResultsReportGraphBuilder",
+    "plot_detection_gap_barplot",
+    "plot_global_heatmap",
+    "plot_grid_heatmap",
+    "plot_heatmap",
+    "ScoreAnalyzer",
+    "TextAnalyzer",
+    "lexical_jaccard",
     # "bootstrap_delta_auroc",
     # "bootstrap_delta_tpr_at_fpr",
     # "bootstrap_metric_delta",
@@ -64,4 +86,8 @@ __all__ = [
     "select_threshold_at_fpr",
     "threshold_metrics",
     "threshold_transfer_report",
+    "word_ratio",
+    "wordration",
+    "token_edit_distance",
+    "normalized_token_edit_distance",
 ]

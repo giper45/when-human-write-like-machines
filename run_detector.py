@@ -87,6 +87,12 @@ def build_detector_dataset(cfg: DictConfig):
     sampled = load_from_disk(str(sampled_dataset_path))
     human_entries = list(sampled["text"])
     machine_entries = load_machine_entries(machine_texts_path)
+    if len(machine_entries) != len(human_entries):
+        raise ValueError(
+            "Human/machine row count mismatch: "
+            f"human={len(human_entries)}, machine={len(machine_entries)}, "
+            f"machine_file={machine_texts_path}. Positional IDs would be invalid."
+        )
 
     human_ids = [f"human::{idx}" for idx in range(len(human_entries))]
     machine_ids = [f"{get_target_regime(cfg)}::{idx}" for idx in range(len(machine_entries))]
@@ -148,9 +154,16 @@ def main(cfg: DictConfig) -> None:
         tpr_fpr_target=get_tpr_fpr_target(cfg),
         comparison_name=f"{target_regime}_vs_human",
         metadata={
+            "detector_name": get_detector_name(cfg),
+            "dataset_name": cfg.dataset.name,
+            "generator_name": cfg.model.name,
             "target_regime": target_regime,
             "machine_postfix": cfg.get("machine_postfix"),
+            "sampled_dataset_path": str(sampled_dataset_path),
             "machine_texts_path": str(machine_texts_path),
+            "rewriter_name": (
+                cfg.model.name if target_regime in {"h2l", "llm2l"} else None
+            ),
             "no_human": human_count,
             "no_machine": machine_count,
         },

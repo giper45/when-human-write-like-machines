@@ -9,7 +9,7 @@ paths:
   generated_dir: generated-texts
   sampled_file: ${experiment.paths.generated_dir}/${dataset.name}_sampled
   machine_file: ${experiment.paths.generated_dir}/${dataset.name}_${model.name}_${machine_postfix}.txt
-  results_dir: results
+  results_dir: results-aligned
   metrics_file: ${experiment.paths.results_dir}/${detector.model_name}_${dataset.name}_${model.name}_${machine_postfix}.npz
   output_dir: runs/main
   dataset_home_path: ${oc.env:HOME}/.datasets

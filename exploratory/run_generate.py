@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 from tqdm import tqdm
 sys.path.append('../')
 
@@ -8,6 +9,7 @@ import hydra
 import atexit  # <--- Importi il modulo globale di clean-up
 from omegaconf import DictConfig, OmegaConf
 from utils.filehandler import FileHandler
+from datasets import load_from_disk
 
 # from utils.device import clear_gpu_full
 from prompts import freellm, h2l, llm2lm, system
@@ -39,10 +41,16 @@ def main(cfg: DictConfig) -> None:
         return
     else:
         model_id = cfg.model.model_id
-        file_handler = FileHandler(f"output/{cfg.dataset.name}_sampled.txt")
         file_handler_write = FileHandler(output_name, mode='w')
 
-        lines = file_handler.get_lines()
+        # Generate from the exact Hugging Face dataset later used by the
+        # detectors. Reading a separately reconstructed TXT silently changed
+        # row identity in the original benchmark.
+        sampled_path = Path(cfg.experiment.paths.sampled_file)
+        if not sampled_path.exists():
+            sampled_path = Path(__file__).resolve().parent / "output" / f"{cfg.dataset.name}_sampled"
+        sampled = load_from_disk(str(sampled_path))
+        lines = list(sampled["text"])
         model, tokenizer = load_model_bf16(model_id)
 
 
@@ -59,4 +67,3 @@ def main(cfg: DictConfig) -> None:
 
 if __name__ == "__main__":
     main()
-
