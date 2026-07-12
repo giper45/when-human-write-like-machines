@@ -3,7 +3,11 @@
 import hydra
 from omegaconf import DictConfig
 from utils.logger import log
-from utils.evaluation.ResultsReportBuilder import build_h2l_robustness_table, build_llm2l_robustness_table
+from utils.evaluation.ResultsReportBuilder import (
+    build_h2l_robustness_table,
+    build_llm2l_robustness_table,
+    build_source_origin_gap_table,
+)
 
 from utils.configuration import list_detector_model_names
 from pathlib import Path
@@ -34,6 +38,15 @@ def main(cfg: DictConfig) -> None:
     log.info(f"Build LLM2L robustness table for results_dir: {results_dir}")
     detector_table = build_llm2l_robustness_table(results_dir, detectors, n_bootstrap=5000, random_seed=42)
     detector_table.to_csv(results_dir / "llm2l_robustness_table.csv")
+
+    log.info("Build paired LLM2L-minus-H2L source-origin gap table")
+    detector_table = build_source_origin_gap_table(
+        results_dir,
+        detectors,
+        n_bootstrap=5000,
+        random_seed=42,
+    )
+    detector_table.to_csv(results_dir / "source_origin_gap_table.csv")
 
 if __name__ == "__main__":
     main()

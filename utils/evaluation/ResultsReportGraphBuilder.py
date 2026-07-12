@@ -617,17 +617,17 @@ class ResultsReportGraphBuilder:
             ax=ax,
         )
         self.apply_bar_hatches(ax, hatches=hatches, hue_levels=hue_order)
-        self._add_ci_error_bars(
-            ax,
-            summary_frame,
-            x="detector",
-            y="mean_tpr_at_fpr",
-            hue="regime",
-            order=detectors,
-            hue_order=hue_order,
-            ci_low="tpr_ci_low",
-            ci_high="tpr_ci_high",
-        )
+        # self._add_ci_error_bars(
+        #     ax,
+        #     summary_frame,
+        #     x="detector",
+        #     y="mean_tpr_at_fpr",
+        #     hue="regime",
+        #     order=detectors,
+        #     hue_order=hue_order,
+        #     ci_low="tpr_ci_low",
+        #     ci_high="tpr_ci_high",
+        # )
         self.format_axis(
             ax,
             xlabel="Detector",
@@ -736,7 +736,7 @@ class ResultsReportGraphBuilder:
             self.save_figure(fig, output_path, formats=formats)
         return fig, axes, frame
 
-    def plot_grouped_delta_barplot(
+    def plot_grouped_barplot(
         self,
         data,
         x,
@@ -753,12 +753,19 @@ class ResultsReportGraphBuilder:
         ci_high=None,
         hatches=None,
         formats=None,
+        baseline=None,
+        ylim=None,
+        x_rotation=25,
+        legend_title=None,
+        legend_ncols=None,
+        value_labels=False,
     ):
         """
-        Plot grouped delta bars and save them.
+        Plot grouped bars and save them.
 
         Hatch patterns supplement color so the groups remain distinguishable in
-        grayscale printouts.
+        grayscale printouts. ``baseline`` is optional so the same renderer can
+        be used for both signed deltas and bounded metrics.
         """
         plt, sns = self._require_plotting()
         self.ensure_style()
@@ -787,14 +794,64 @@ class ResultsReportGraphBuilder:
             ax=ax,
         )
         self.apply_bar_hatches(ax, hatches=hatches, hue_levels=hue_order)
-        ax.axhline(0.0, color="0.15", linewidth=0.8)
-        self._add_ci_error_bars(ax, frame, x, y, hue, order, hue_order, ci_low, ci_high)
+        if baseline is not None:
+            ax.axhline(float(baseline), color="0.15", linewidth=0.8)
+        # self._add_ci_error_bars(ax, frame, x, y, hue, order, hue_order, ci_low, ci_high)
         self.format_axis(ax, xlabel=xlabel or x.title(), ylabel=ylabel, title=title, grid_axis="y")
-        ax.tick_params(axis="x", rotation=25)
-        ax.legend(title=hue.title(), frameon=False, ncols=min(3, max(1, len(hue_order))))
+        if ylim is not None:
+            ax.set_ylim(*ylim)
+        ax.tick_params(axis="x", rotation=x_rotation)
+        ax.legend(
+            title=legend_title,
+            frameon=False,
+            ncols=legend_ncols or min(3, max(1, len(hue_order))),
+        )
+        if value_labels:
+            for container in [item for item in ax.containers if hasattr(item, "patches")]:
+                ax.bar_label(container, fmt="%.3f", padding=2, fontsize=7)
         fig.tight_layout(pad=0.2)
         self.save_figure(fig, output_path, formats=formats)
         return fig, ax
+
+    def plot_grouped_delta_barplot(
+        self,
+        data,
+        x,
+        y,
+        hue,
+        output_path,
+        title,
+        ylabel,
+        xlabel=None,
+        figsize=(7.1, 3.2),
+        order=None,
+        hue_order=None,
+        ci_low=None,
+        ci_high=None,
+        hatches=None,
+        formats=None,
+    ):
+        """Plot signed grouped deltas using the shared grouped-bar renderer."""
+        return self.plot_grouped_barplot(
+            data=data,
+            x=x,
+            y=y,
+            hue=hue,
+            output_path=output_path,
+            title=title,
+            ylabel=ylabel,
+            xlabel=xlabel,
+            figsize=figsize,
+            order=order,
+            hue_order=hue_order,
+            ci_low=ci_low,
+            ci_high=ci_high,
+            hatches=hatches,
+            formats=formats,
+            baseline=0.0,
+            x_rotation=25,
+            legend_title=hue.title(),
+        )
 
     def _add_ci_error_bars(self, ax, frame, x, y, hue, order, hue_order, ci_low, ci_high) -> None:
         ci_low, ci_high = self._resolve_ci_columns(frame, y, ci_low, ci_high)

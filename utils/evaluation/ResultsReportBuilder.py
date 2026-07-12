@@ -29,6 +29,15 @@ H2LRobustnessTableSchema = pa.DataFrameSchema(
     strict=True,
 )
 
+SourceOriginGapTableSchema = pa.DataFrameSchema(
+    columns={
+        ("AUROC gap", "mean [95% CI]"): pa.Column(str, coerce=True),
+        ("TPR@1%FPR gap", "mean [95% CI]"): pa.Column(str, coerce=True),
+    },
+    index=pa.Index(str, name="Detector"),
+    strict=True,
+)
+
 # Example usage for runtime validation (and static type checking friendliness)
 def validate (df: pd.DataFrame) -> pd.DataFrame:
     # Validate the DataFrame against the schema
@@ -258,3 +267,55 @@ def build_h2l_robustness_table(
         digits=digits,
     )
 
+
+def build_source_origin_gap_table(
+    results_dir,
+    detector_names,
+    n_bootstrap=5000,
+    random_seed=42,
+    alpha=0.05,
+    digits=3,
+):
+    """Build paired LLM2L-minus-H2L gaps over dataset x generator blocks."""
+    rows = []
+
+    for detector_name in detector_names:
+        all_metrics = Metrics.load_metrics_of_detector(results_dir, detector_name)
+        h2l_metrics = filter_metrics_by_target_regime(all_metrics, "h2l")
+        llm2l_metrics = filter_metrics_by_target_regime(all_metrics, "llm2l")
+        h2l_metrics, llm2l_metrics = align_metric_blocks(
+            h2l_metrics,
+            llm2l_metrics,
+        )
+
+        gap_auroc = bootstrap_paired_delta_for_detector(
+            baseline_metrics=h2l_metrics,
+            target_metrics=llm2l_metrics,
+            metric_name="auroc",
+            n_bootstrap=n_bootstrap,
+            random_seed=random_seed,
+        )
+        gap_tpr = bootstrap_paired_delta_for_detector(
+            baseline_metrics=h2l_metrics,
+            target_metrics=llm2l_metrics,
+            metric_name="tpr_at_fpr",
+            n_bootstrap=n_bootstrap,
+            random_seed=random_seed,
+        )
+
+        rows.append({
+            "Detector": detector_name,
+            ("AUROC gap", "mean [95% CI]"): format_summary_ci(
+                summarize_bootstrap_array(gap_auroc, alpha=alpha),
+                digits=digits,
+            ),
+            ("TPR@1%FPR gap", "mean [95% CI]"): format_summary_ci(
+                summarize_bootstrap_array(gap_tpr, alpha=alpha),
+                digits=digits,
+            ),
+        })
+
+    df = pd.DataFrame(rows).set_index("Detector")
+    df.index.name = "Detector"
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+    return SourceOriginGapTableSchema.validate(df)
