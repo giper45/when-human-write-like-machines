@@ -44,12 +44,6 @@ ranges:
     range: [351, 500]
     n_per_domain: 200
 
-split:
-  by: sample_id
-  calibration: 0.20
-  test: 0.80
-  seed: 42
-
 regimes:
   - human
   - free_llm
@@ -98,11 +92,6 @@ evaluation:
     - brier
 
   fpr_targets: [0.01]
-
-  calibration_regimes:
-    - free_llm
-    - h2l
-    - llm2l
 
   bootstrap:
     n: 5000
