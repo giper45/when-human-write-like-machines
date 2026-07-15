@@ -194,17 +194,3 @@ See `ARB-Dataset/README.md` for the dataset card, field documentation, and regim
 ./venv/bin/python -m pytest tests/
 ```
 
-## Citation
-
-```bibtex
-@dataset{perrone_arb_2026,
-  title        = {ARB: Authorship-Rewriting Benchmark},
-  author       = {Perrone, Gaetano and Romano, Simon Pietro},
-  year         = {2026},
-  publisher    = {Hugging Face},
-  version      = {1.0.0},
-  url          = {https://huggingface.co/datasets/giper45/ARB-Dataset}
-}
-```
-
-See `paper/main.tex` for the full paper and its bibliography (`paper/bib.bib`).
